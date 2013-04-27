@@ -1,0 +1,6 @@
+OimClientLibrary is a library for Robot Framework that provides keywords for interacting with the Oracle Identity Manager product (OIM).
+The [http://docs.oracle.com/cd/E21764_01/doc.1111/e14309/apis.htm|official OIM 11g API] is used.
+
+= Usage =
+
+Please see this library's README for installation and usage information.
