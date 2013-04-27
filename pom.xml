@@ -3,7 +3,7 @@
 
   <groupId>nl.fuselogic</groupId>
   <artifactId>robotframework-oimclientlibrary</artifactId>
-  <version>0.2-SNAPSHOT</version>
+  <version>0.1-SNAPSHOT</version>
   <packaging>jar</packaging>
   <properties>
     <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
@@ -14,6 +14,26 @@
   <scm>
     <connection>scm:git:https://github.com/jrkoiter/robotframework-oimclientlibrary.git</connection>
   </scm>
+
+  <developers>
+    <developer>
+      <id>jrkoiter</id>
+      <name>Joost Koiter</name>
+      <email>joost.koiter@fuselogic.nl</email>
+      <organization>FuseLogic</organization>
+      <organizationUrl>http://www.fuselogic.nl</organizationUrl>
+    </developer>
+  </developers>
+
+  <build>
+    <extensions>
+      <extension>
+        <groupId>org.springframework.build</groupId>
+        <artifactId>aws-maven</artifactId>
+        <version>4.4.0.RELEASE</version>
+      </extension>
+    </extensions>
+  </build>
 
   <dependencies>
     <dependency>
@@ -34,6 +54,19 @@
     </dependency>
   </dependencies>
 
+  <distributionManagement>
+      <repository>
+          <id>aws-release</id>
+          <name>AWS Release Repository</name>
+          <url>s3://maven-repository-jrkoiter/release</url>
+      </repository>
+      <snapshotRepository>
+          <id>aws-snapshot</id>
+          <name>AWS Snapshot Repository</name>
+          <url>s3://maven-repository-jrkoiter/snapshot</url>
+      </snapshotRepository>
+  </distributionManagement>
+
   <!-- 
     Install (proprietary) Oracle dependency into local repository as follows:
 
@@ -42,9 +75,10 @@
     Source: http://stackoverflow.com/questions/2229757/maven-add-a-dependency-to-a-jar-by-relative-path/2230464#2230464
   -->
   <repositories>
-  <repository>
-    <id>my-local-repo</id>
-    <url>file://${basedir}/my-repo</url>
-  </repository>
-</repositories>
+    <repository>
+      <id>my-local-repo</id>
+      <url>file://${basedir}/my-repo</url>
+    </repository>
+  </repositories>
+  
 </project>
