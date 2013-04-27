@@ -22,7 +22,7 @@ Dependencies
 Installation
 ------------
 
-Either [download](http://tbd) the jar file of the current version directly, or build the library from source by following the steps below. A working Maven installation is assumed:
+Either [download](https://s3-eu-west-1.amazonaws.com/robotframework-libraries/robotframework-oimclientlibrary-0.1.jar) the jar file of the current version directly, or build the library from source by following the steps below. A working Maven installation is assumed:
 
 1. Obtain and unzip oimclient.zip into a directory
 2. Get the source of the robotframework-oimclientlibrary (ie. this library)
