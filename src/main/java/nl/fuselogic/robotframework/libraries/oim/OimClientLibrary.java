@@ -1,9 +1,27 @@
+/*
+ * Copyright 20013 FuseLogic BV
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
 package nl.fuselogic.robotframework.libraries.oim;
 
 import java.io.InputStream;
 
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Hashtable;
+import java.util.Iterator;
 import java.util.List;
 
 import java.util.Scanner;
@@ -22,11 +40,19 @@ import oracle.iam.platform.authz.exception.AccessDeniedException;
 
 import oracle.iam.scheduler.api.SchedulerService;
 
+import oracle.iam.scheduler.exception.IncorrectScheduleTaskDefinationException;
+import oracle.iam.scheduler.exception.LastModifyDateNotSetException;
 import oracle.iam.scheduler.exception.NoJobHistoryFoundException;
+import oracle.iam.scheduler.exception.ParameterValueTypeNotSupportedException;
+import oracle.iam.scheduler.exception.RequiredParameterNotSetException;
 import oracle.iam.scheduler.exception.SchedulerAccessDeniedException;
 import oracle.iam.scheduler.exception.SchedulerException;
 
+import oracle.iam.scheduler.vo.JobDetails;
 import oracle.iam.scheduler.vo.JobHistory;
+
+import oracle.iam.scheduler.vo.JobParameter;
+import oracle.iam.scheduler.vo.ScheduledTask;
 
 import org.robotframework.javalib.annotation.ArgumentNames;
 import org.robotframework.javalib.annotation.RobotKeyword;
@@ -36,7 +62,7 @@ import org.robotframework.javalib.library.AnnotationLibrary;
 @RobotKeywords
 public class OimClientLibrary extends AnnotationLibrary {
     
-    public static final String ROBOT_LIBRARY_VERSION = "0.1";
+    public static final String ROBOT_LIBRARY_VERSION = "0.2";
     
     private static enum JobStatus { SHUTDOWN, STARTED, STOPPED, NONE, PAUSED, RUNNING, FAILED, INTERRUPT }
     
@@ -127,6 +153,70 @@ public class OimClientLibrary extends AnnotationLibrary {
     public void runOimScheduledJobAndWait(String jobname) throws SchedulerException, SchedulerAccessDeniedException,
                                                           InterruptedException, NoJobHistoryFoundException {
         runJob(jobname, true);
+    }
+    
+    @RobotKeyword("Set a parameter on an OIM scheduled job")
+    @ArgumentNames({"jobname","paramname","paramvalue"})
+    public void setOimJobParameter(String jobname, String paramname, String paramvalue) throws SchedulerException, IncorrectScheduleTaskDefinationException, RequiredParameterNotSetException,
+                                                                                               ParameterValueTypeNotSupportedException, LastModifyDateNotSetException, SchedulerAccessDeniedException {
+        if (oimClient == null) {
+            throw new RuntimeException("There is no connection to OIM");
+        }
+        if (schedulerService == null) {
+            schedulerService = oimClient.getService(SchedulerService.class);
+        }
+        
+        JobDetails jd = schedulerService.getJobDetail(jobname);
+        ScheduledTask taskName = schedulerService.lookupScheduledTask(jd.getTaskName());
+        
+        HashMap<String, JobParameter> taskParamMap = taskName.getParameters();
+        JobParameter jp = taskParamMap.get(paramname);
+        
+        if(jp == null) {
+            throw new RuntimeException("Job "+jobname+" has no parameter named "+paramname);
+        }
+        
+        if(jp.getDataType().equals(JobParameter.DATA_TYPE_STRING)) {
+            jp.setValue(paramvalue);
+        } else if(jp.getDataType().equals(JobParameter.DATA_TYPE_NUMBER)) {
+            jp.setValue(Long.valueOf(paramvalue));
+        } else if(jp.getDataType().equals(JobParameter.DATA_TYPE_BOOLEAN)) {
+            jp.setValue(Boolean.valueOf(paramvalue));
+        } else if(jp.getDataType().equals(JobParameter.DATA_TYPE_ITRESOURCE)) {
+            throw new RuntimeException("Data type "+JobParameter.DATA_TYPE_ITRESOURCE+" of parameter "+paramname+" is not implemented.");
+        } else {
+            throw new RuntimeException("Parameter "+paramname+" has unexpected data type "+jp.getDataType());
+        }
+        
+        HashMap<String, JobParameter> jph = jd.getParams();
+        jph.put(paramname, jp);
+        jd.setParams(jph);
+        
+        System.out.println("*INFO* Setting value " + jp.getValue().toString());
+        
+        schedulerService.updateJob(jd);
+    }
+    
+    @RobotKeyword("Get a parameter value of an OIM scheduled job")
+    @ArgumentNames({"jobname","paramname"})
+    public String getOimJobParameter(String jobname, String paramname) throws SchedulerException, IncorrectScheduleTaskDefinationException {
+        if (oimClient == null) {
+            throw new RuntimeException("There is no connection to OIM");
+        }
+        if (schedulerService == null) {
+            schedulerService = oimClient.getService(SchedulerService.class);
+        }
+        
+        JobDetails jd = schedulerService.getJobDetail(jobname);
+        JobParameter jp = jd.getParams().get(paramname);
+        
+        if(jp == null) {
+            throw new RuntimeException("Job "+jobname+" has no parameter named "+paramname);
+        }
+        
+        System.out.println("*INFO* Returning value " + jp.getValue().toString());
+        
+        return jp.getValue().toString();
     }
     
     private void runJob(String jobname, boolean wait) throws SchedulerException, SchedulerAccessDeniedException,
