@@ -225,6 +225,21 @@ public class OimClientLibrary extends AnnotationLibrary {
         deleteOimUser(usrkey, false);
     }
     
+    @RobotKeyword("Returns true if specified user is present in OIM, false otherwise. See `Get Oim User` for more information on usage.")
+    @ArgumentNames({"usersearchattributes"})
+    public boolean doesOimUserExist(HashMap<String, String> usersearchattributes) throws AccessDeniedException, UserSearchException, NoSuchAttributeException, ConfigManagerException, ParseException {
+       
+        List<User> users = searchUsers(usersearchattributes);
+       
+        if(users.isEmpty()) {
+            return false;
+        } else if(users.size() == 1) {
+            return true;
+        } else {
+            throw new RuntimeException("Multiple users in OIM match '"+usersearchattributes.toString()+"'");
+        }
+    }
+    
     @RobotKeyword("Returns an all strings dictionary containing the accountid, accountstatus and parent form data of the specified account in OIM.\n\n" +
         "Optional argument _parentformsearchdata_ is a dictionary that specifies name/value pairs of parent form data.\n\n" +
         "For possible _accountstatus_ values, see [http://docs.oracle.com/cd/E40329_01/apirefs.1112/e28159/oracle/iam/provisioning/api/ProvisioningConstants.ObjectStatus.html|ProvisioningConstants.ObjectStatus].\n\n" +
@@ -284,7 +299,12 @@ public class OimClientLibrary extends AnnotationLibrary {
     @ArgumentNames({"usrkey", "appinstname", "objstatus=", "parentformsearchdata="})
     public void oimAccountShouldExist(String usrkey, String appinstname, String objstatus, HashMap<String, String> parentformsearchdata) throws UserNotFoundException,
                                                                                         GenericProvisioningException, ApplicationInstanceNotFoundException, GenericAppInstanceServiceException {
-        List<Account> accounts = searchAccounts(usrkey, appinstname, objstatus, parentformsearchdata, false);
+        
+        boolean populateAccountData = true;
+        if(parentformsearchdata == null || parentformsearchdata.isEmpty()) {
+            populateAccountData = false;
+        }
+        List<Account> accounts = searchAccounts(usrkey, appinstname, objstatus, parentformsearchdata, populateAccountData);
         
         if(accounts.isEmpty()) {
             throw new RuntimeException("OIM user "+usrkey+" does not have any account that matches: appinstname="+appinstname+",objstatus="+objstatus+",parentformsearchdata="+parentformsearchdata);
@@ -309,7 +329,11 @@ public class OimClientLibrary extends AnnotationLibrary {
     @ArgumentNames({"usrkey", "appinstname", "objstatus=", "parentformsearchdata="})
     public void oimAccountShouldNotExist(String usrkey, String appinstname, String objstatus, HashMap<String, String> parentformsearchdata) throws UserNotFoundException,
                                                                                         GenericProvisioningException, ApplicationInstanceNotFoundException, GenericAppInstanceServiceException {
-        List<Account> accounts = searchAccounts(usrkey, appinstname, objstatus, parentformsearchdata, false);
+        boolean populateAccountData = true;
+        if(parentformsearchdata == null || parentformsearchdata.isEmpty()) {
+            populateAccountData = false;
+        }
+        List<Account> accounts = searchAccounts(usrkey, appinstname, objstatus, parentformsearchdata, populateAccountData);
         
         if(accounts.size() == 1) {
             throw new RuntimeException("OIM user "+usrkey+" has 1 account that matches: appinstname="+appinstname+",objstatus="+objstatus+",parentformsearchdata="+parentformsearchdata);
@@ -631,7 +655,7 @@ public class OimClientLibrary extends AnnotationLibrary {
         ApplicationInstance appInst = applicationInstanceService.findApplicationInstanceByName(appinstname);
         
         SearchCriteria criteria = new SearchCriteria(ProvisioningConstants.AccountSearchAttribute.APPINST_KEY.getId(), appInst.getApplicationInstanceKey(), SearchCriteria.Operator.EQUAL);
-        if(accountstatus != null) {
+        if(accountstatus != null && !accountstatus.isEmpty()) {
             criteria = new SearchCriteria(criteria, new SearchCriteria(ProvisioningConstants.AccountSearchAttribute.ACCOUNT_STATUS.getId(), accountstatus, SearchCriteria.Operator.EQUAL), SearchCriteria.Operator.AND);
         }
         
