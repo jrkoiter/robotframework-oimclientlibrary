@@ -49,6 +49,8 @@ import oracle.iam.identity.exception.NoSuchUserException;
 
 import oracle.iam.identity.exception.RoleSearchException;
 import oracle.iam.identity.exception.UserDeleteException;
+import oracle.iam.identity.exception.UserDisableException;
+import oracle.iam.identity.exception.UserLookupException;
 import oracle.iam.identity.exception.UserModifyException;
 import oracle.iam.identity.exception.UserSearchException;
 import oracle.iam.identity.exception.ValidationFailedException;
@@ -101,7 +103,7 @@ public class OimClientLibrary extends AnnotationLibrary {
    
     private static enum JobStatus { SHUTDOWN, STARTED, STOPPED, NONE, PAUSED, RUNNING, FAILED, INTERRUPT }
    
-    private static OIMClient        oimClient;
+    private OIMClient oimClient;
     
     private static SimpleDateFormat timestampDateFormat = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS");
    
@@ -129,12 +131,19 @@ public class OimClientLibrary extends AnnotationLibrary {
    
     @RobotKeyword("Make a connection to OIM")
     @ArgumentNames({"username", "password", "url"})
-    public void connectToOim(String username, String password, String url) throws LoginException {
+    public synchronized void connectToOim(String username, String password, String url) throws LoginException {
+        
         if(oimClient != null) {
-            System.out.println("*WARN* There is already a connection to OIM");
-            return;
+            try {
+                oimClient.getService(UserManager.class);
+                System.out.println("*WARN* There is already a connection to OIM");
+                return;
+            } catch (Exception e) {
+                System.out.println("*WARN* "+e.getMessage());
+                System.out.println("*WARN* There is already a connection to OIM, but it might be stale. Going to reconnect.");
+            }
         }
-       
+        
         System.out.println("*INFO* Connecting to "+url+" as "+username);
        
         Hashtable env = new Hashtable();
@@ -190,7 +199,7 @@ public class OimClientLibrary extends AnnotationLibrary {
                     "Set _force_ to True if immediate deletion is required, even if OIM system property _XL.UserDeleteDelayPeriod_ is set to a non-zero value. If mentioned system property is set to zero,  _force_  has no effect: the deletion will always be immediate.\n\n"+
                     "See `Get Oim User` how to obtain a ${usrkey}.")
     @ArgumentNames({"usrkey","force="})
-    public void deleteOimUser(String usrkey, boolean force) throws ValidationFailedException, AccessDeniedException, UserModifyException, NoSuchUserException, UserDeleteException {
+    public void deleteOimUser(String usrkey, boolean force) throws ValidationFailedException, AccessDeniedException, UserModifyException, NoSuchUserException, UserDeleteException, UserDisableException, UserLookupException {
         if (oimClient == null) {
             throw new RuntimeException("There is no connection to OIM");
         }
@@ -200,7 +209,13 @@ public class OimClientLibrary extends AnnotationLibrary {
         System.out.println("*INFO* Deleting user "+usrkey);
         
         if(force) {
+            User user = userManager.getDetails(usrkey, null, false);
+            
             System.out.println("*INFO* Bypassing any delayed delete configuration in OIM");
+            
+            if(!user.getStatus().equals(UserManagerConstants.AttributeValues.USER_STATUS_DISABLED.getId())) {
+                userManager.disable(usrkey, false);
+            }
             
             Calendar cal = Calendar.getInstance();
             cal.set(Calendar.HOUR_OF_DAY, 0);
@@ -214,14 +229,19 @@ public class OimClientLibrary extends AnnotationLibrary {
             
             // UserManager API delete operation will only execute a delayed delete
             // if context parameter "operationinitiator" is set to "scheduler".
-            ContextManager.setValue("operationinitiator", new ContextAwareString("scheduler"));
+            ContextManager.pushContext(null, ContextManager.ContextTypes.ADMIN, null);
+            ContextManager.setValue("operationinitiator", new ContextAwareString("scheduler"), true);
         }
         
         userManager.delete(usrkey, false);
+        
+        if (force) {
+            ContextManager.popContext();
+        }
     }
     
     @RobotKeywordOverload
-    public void deleteOimUser(String usrkey) throws ValidationFailedException, AccessDeniedException, UserModifyException, NoSuchUserException, UserDeleteException {
+    public void deleteOimUser(String usrkey) throws ValidationFailedException, AccessDeniedException, UserModifyException, NoSuchUserException, UserDeleteException, UserDisableException, UserLookupException {
         deleteOimUser(usrkey, false);
     }
     
@@ -263,6 +283,22 @@ public class OimClientLibrary extends AnnotationLibrary {
         
         Account account = accounts.get(0);
         
+        return getOimAccountReturnMap(account);
+    }
+    
+    @RobotKeywordOverload
+    public HashMap<String, String> getOimAccount(String usrkey, String appinstname, String accountstatus) throws UserNotFoundException, GenericProvisioningException,
+                                                                                                ApplicationInstanceNotFoundException, GenericAppInstanceServiceException {
+        return getOimAccount(usrkey, appinstname, accountstatus, null);
+    }
+    
+    @RobotKeywordOverload
+    public HashMap<String, String> getOimAccount(String usrkey, String appinstname) throws UserNotFoundException, GenericProvisioningException,
+                                                                                ApplicationInstanceNotFoundException, GenericAppInstanceServiceException {
+        return getOimAccount(usrkey, appinstname, null, null);
+    }
+    
+    private HashMap<String, String> getOimAccountReturnMap(Account account) {
         HashMap<String, String> returnMap = new HashMap<String, String>();
         returnMap.put("accountid", account.getAccountID());
         returnMap.put("accountstatus", account.getAccountStatus());
@@ -279,20 +315,7 @@ public class OimClientLibrary extends AnnotationLibrary {
                 returnMap.put(entry.getKey(), "");
             }
         }
-        
         return returnMap;
-    }
-    
-    @RobotKeywordOverload
-    public HashMap<String, String> getOimAccount(String usrkey, String appinstname, String accountstatus) throws UserNotFoundException, GenericProvisioningException,
-                                                                                                ApplicationInstanceNotFoundException, GenericAppInstanceServiceException {
-        return getOimAccount(usrkey, appinstname, accountstatus, null);
-    }
-    
-    @RobotKeywordOverload
-    public HashMap<String, String> getOimAccount(String usrkey, String appinstname) throws UserNotFoundException, GenericProvisioningException,
-                                                                                ApplicationInstanceNotFoundException, GenericAppInstanceServiceException {
-        return getOimAccount(usrkey, appinstname, null, null);
     }
     
     @RobotKeyword("Fail if user does not have specified account in OIM. See `Get Oim Account` for more information on usage.")
@@ -391,6 +414,48 @@ public class OimClientLibrary extends AnnotationLibrary {
             
             return returnMap;
         }
+    }
+    
+    @RobotKeyword("Modifies parent form data specified in dictionary _modifyparentformdata_ of account identified by _accountid_. Returns the modified account, same as `Get Oim Account`.\n\n" +
+                    "Any date typed attributes must be specified and are also returned as _yyyy-MM-dd HH:mm:ss.SSS_, ready to use with [http://robotframework.org/robotframework/latest/libraries/DateTime.html|DateTime].\n\n" +
+                    "See `Get Oim Account` how to obtain an ${accountid}.")
+    @ArgumentNames({"accountid","modifyparentformdata"})
+    public HashMap<String, String> modifyOimAccount(String accountid, HashMap<String, String> modifyparentformdata) throws AccountNotFoundException, oracle.iam.platform.authopss.exception.AccessDeniedException, GenericProvisioningException, ParseException   {
+        
+        ProvisioningService provisioningService = oimClient.getService(ProvisioningService.class);
+        
+        Account account = provisioningService.getAccountDetails(Long.valueOf(accountid));
+        
+        Map<String, Object> parentFormData = account.getAccountData().getData();
+        
+        for (Map.Entry<String, String> entry : modifyparentformdata.entrySet()) {
+            String key = entry.getKey();
+            String newValueStr = entry.getValue();
+            
+            if(!parentFormData.containsKey(key)) {
+                throw new RuntimeException("Parent form data does not contain field '"+key+"'. It contains the following fields: "+parentFormData.keySet());
+            }
+            
+            Object currentValue = parentFormData.get(key);
+            Object newValue;
+            
+            if (currentValue instanceof Date) {
+                newValue = timestampDateFormat.parse(newValueStr);
+            } else if (currentValue instanceof Timestamp) {
+                Date d = timestampDateFormat.parse(newValueStr);
+                newValue = new Timestamp(d.getTime());
+            } else {
+                newValue = newValueStr;
+            }
+            
+            parentFormData.put(key, newValue);
+        }
+        
+        System.out.println("*INFO* Modifying account "+accountid+" with form data "+modifyparentformdata.toString());
+        
+        provisioningService.modify(account);
+        
+        return getOimAccountReturnMap(account);
     }
     
     @RobotKeyword("Modifies attributes specified in dictionary _modifyattributes_ of user identified by _usrkey_. Returns the modified user (including all attributes) as an all strings dictionary.\n\n" +
