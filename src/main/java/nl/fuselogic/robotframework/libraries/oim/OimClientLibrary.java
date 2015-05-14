@@ -88,6 +88,7 @@ import oracle.iam.scheduler.vo.JobDetails;
 import oracle.iam.scheduler.vo.JobHistory;
 import oracle.iam.scheduler.vo.JobParameter;
 import oracle.iam.scheduler.vo.ScheduledTask;
+import oracle.iam.selfservice.self.selfmgmt.api.AuthenticatedSelfService;
 
 import org.robotframework.javalib.annotation.ArgumentNames;
 import org.robotframework.javalib.annotation.RobotKeyword;
@@ -135,11 +136,20 @@ public class OimClientLibrary extends AnnotationLibrary {
         
         if(oimClient != null) {
             try {
-                oimClient.getService(UserManager.class);
-                System.out.println("*WARN* There is already a connection to OIM");
-                return;
+                // Check if connection is still valid by getting user details
+                AuthenticatedSelfService authenticatedSelfService = oimClient.getService(AuthenticatedSelfService.class);
+                Set<String> retAttrs = new HashSet<String>();
+                retAttrs.add(UserManagerConstants.AttributeName.USER_LOGIN.getId());
+                User user = authenticatedSelfService.getProfileDetails(retAttrs);
+                
+                if(user.getLogin().equalsIgnoreCase(username)) {
+                    System.out.println("*WARN* There is already a connection to OIM");
+                    return;
+                } else {
+                    System.out.println("*WARN* There is already a connection to OIM as user "+user.getLogin()+". Going to reconnect as user "+username+".");
+                }
             } catch (Exception e) {
-                System.out.println("*WARN* "+e.getMessage());
+                System.out.println("*TRACE* Got exception "+e.getClass().getName()+ ". Message: " +e.getMessage());
                 System.out.println("*WARN* There is already a connection to OIM, but it might be stale. Going to reconnect.");
             }
         }
@@ -155,7 +165,7 @@ public class OimClientLibrary extends AnnotationLibrary {
     }
    
     @RobotKeyword("Disconnect from OIM")
-    public void disconnectFromOim() {
+    public synchronized void disconnectFromOim() {
         if (oimClient == null) {
             System.out.println("*WARN* There is no connection to OIM");
             return;
@@ -437,13 +447,17 @@ public class OimClientLibrary extends AnnotationLibrary {
             }
             
             Object currentValue = parentFormData.get(key);
-            Object newValue;
+            Object newValue = null;
             
             if (currentValue instanceof Date) {
-                newValue = timestampDateFormat.parse(newValueStr);
+                if(!newValueStr.isEmpty()) {
+                    newValue = timestampDateFormat.parse(newValueStr);
+                }
             } else if (currentValue instanceof Timestamp) {
-                Date d = timestampDateFormat.parse(newValueStr);
-                newValue = new Timestamp(d.getTime());
+                if(!newValueStr.isEmpty()) {
+                    Date d = timestampDateFormat.parse(newValueStr);
+                    newValue = new Timestamp(d.getTime());
+                }
             } else {
                 newValue = newValueStr;
             }
@@ -482,9 +496,13 @@ public class OimClientLibrary extends AnnotationLibrary {
             
             AttributeDefinition attributeDefinition = configManager.getAttribute(Constants.Entity.USER, key);
             if (attributeDefinition.getBackendType().equalsIgnoreCase("date")) {
-                value = timestampDateFormat.parse(value.toString());
+                if(!value.toString().isEmpty()) {
+                    value = timestampDateFormat.parse(value.toString());
+                }
             } else if (attributeDefinition.getBackendType().equalsIgnoreCase("number")) {
-                value = Long.valueOf(value.toString());
+                if(!value.toString().isEmpty()) {
+                    value = Long.valueOf(value.toString());
+                }
             }
             userModify.setAttribute(key, value);
         }
