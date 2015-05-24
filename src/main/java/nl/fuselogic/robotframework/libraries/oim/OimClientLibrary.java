@@ -868,7 +868,7 @@ public class OimClientLibrary extends AnnotationLibrary {
         }
         tcResultSet resultSet = lookupIntf.getLookupValues(lookupcode, filter);
         
-        System.out.println("*INFO* Found " + resultSet.getRowCount() + " entries in lookup " + lookupcode + " that match " + encode);
+        System.out.println("*INFO* Found " + resultSet.getRowCount() + " entries in lookup " + lookupcode + " that match " + filter);
         
         if(resultSet.isEmpty()) {
             throw new RuntimeException("No entry in OIM lookup '"+lookupcode+"' matches "+filter);
