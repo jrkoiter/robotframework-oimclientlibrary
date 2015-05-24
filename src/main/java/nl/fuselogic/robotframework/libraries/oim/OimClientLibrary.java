@@ -18,7 +18,12 @@ package nl.fuselogic.robotframework.libraries.oim;
 
 
 import Thor.API.Exceptions.tcAPIException;
+import Thor.API.Exceptions.tcColumnNotFoundException;
+import Thor.API.Exceptions.tcInvalidAttributeException;
+import Thor.API.Exceptions.tcInvalidLookupException;
+import Thor.API.Exceptions.tcInvalidValueException;
 import Thor.API.Operations.tcAccessPolicyOperationsIntf;
+import Thor.API.Operations.tcLookupOperationsIntf;
 import Thor.API.tcResultSet;
 
 import java.io.InputStream;
@@ -45,7 +50,10 @@ import oracle.iam.configservice.api.Constants;
 import oracle.iam.configservice.exception.ConfigManagerException;
 import oracle.iam.configservice.exception.NoSuchAttributeException;
 import oracle.iam.configservice.vo.AttributeDefinition;
+import oracle.iam.identity.exception.NoSuchRoleException;
 import oracle.iam.identity.exception.NoSuchUserException;
+import oracle.iam.identity.exception.RoleDeleteException;
+import oracle.iam.identity.exception.RoleModifyException;
 
 import oracle.iam.identity.exception.RoleSearchException;
 import oracle.iam.identity.exception.UserDeleteException;
@@ -55,6 +63,7 @@ import oracle.iam.identity.exception.UserModifyException;
 import oracle.iam.identity.exception.UserSearchException;
 import oracle.iam.identity.exception.ValidationFailedException;
 import oracle.iam.identity.rolemgmt.api.RoleManager;
+import oracle.iam.identity.rolemgmt.api.RoleManagerConstants;
 import oracle.iam.identity.rolemgmt.api.RoleManagerConstants.RoleAttributeName;
 import oracle.iam.identity.rolemgmt.vo.Role;
 import oracle.iam.identity.usermgmt.api.UserManager;
@@ -107,6 +116,9 @@ public class OimClientLibrary extends AnnotationLibrary {
     private OIMClient oimClient;
     
     private static SimpleDateFormat timestampDateFormat = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS");
+    
+    private static String LOOKUP_ENCODE_NAME= "Lookup Definition.Lookup Code Information.Code Key";
+    private static String LOOKUP_DECODE_NAME= "Lookup Definition.Lookup Code Information.Decode";
    
     public OimClientLibrary(List<String> list) {
         super(list);
@@ -128,6 +140,17 @@ public class OimClientLibrary extends AnnotationLibrary {
             return s.hasNext() ? s.next() : "";
         }
         return super.getKeywordDocumentation(keywordName);
+    }
+    
+    @RobotKeyword("Adds an entry having encode value _encode_ and decode value _decode_ to the lookup identified by _lookupcode_.")
+    @ArgumentNames({"lookupcode","encode","decode"})
+    public void addOimLookupValue(String lookupcode, String encode, String decode) throws tcAPIException, tcInvalidLookupException, tcInvalidValueException {
+        if (oimClient == null) {
+            throw new RuntimeException("There is no connection to OIM");
+        }
+        tcLookupOperationsIntf lookupIntf = oimClient.getService(tcLookupOperationsIntf.class);
+        
+        lookupIntf.addLookupValue(lookupcode, encode, decode, null, null);
     }
    
     @RobotKeyword("Make a connection to OIM")
@@ -205,6 +228,20 @@ public class OimClientLibrary extends AnnotationLibrary {
         }
     }
     
+    @RobotKeyword(  "Deletes specified role in OIM. See `Get Oim Role` how to obtain a ${rolekey}.")
+    @ArgumentNames({"rolekey"})
+    public void deleteOimRole(String rolekey) throws ValidationFailedException, AccessDeniedException, RoleDeleteException, NoSuchRoleException {
+        if (oimClient == null) {
+            throw new RuntimeException("There is no connection to OIM");
+        }
+        
+        RoleManager roleManager = oimClient.getService(RoleManager.class);
+        
+        System.out.println("*INFO* Deleting role "+rolekey);
+        
+        roleManager.delete(rolekey);
+    }
+    
     @RobotKeyword(  "Deletes specified user in OIM.\n\n"+
                     "Set _force_ to True if immediate deletion is required, even if OIM system property _XL.UserDeleteDelayPeriod_ is set to a non-zero value. If mentioned system property is set to zero,  _force_  has no effect: the deletion will always be immediate.\n\n"+
                     "See `Get Oim User` how to obtain a ${usrkey}.")
@@ -253,6 +290,21 @@ public class OimClientLibrary extends AnnotationLibrary {
     @RobotKeywordOverload
     public void deleteOimUser(String usrkey) throws ValidationFailedException, AccessDeniedException, UserModifyException, NoSuchUserException, UserDeleteException, UserDisableException, UserLookupException {
         deleteOimUser(usrkey, false);
+    }
+    
+    @RobotKeyword("Returns true if specified role is present in OIM, false otherwise. See `Get Oim Role` for more information on usage.")
+    @ArgumentNames({"rolesearchattributes"})
+    public boolean doesOimRoleExist(HashMap<String, String> rolesearchattributes) throws AccessDeniedException, RoleSearchException, NoSuchAttributeException, ConfigManagerException, ParseException {
+       
+        List<Role> roles = searchRoles(rolesearchattributes);
+       
+        if(roles.isEmpty()) {
+            return false;
+        } else if(roles.size() == 1) {
+            return true;
+        } else {
+            throw new RuntimeException("Multiple roles in OIM match '"+rolesearchattributes.toString()+"'");
+        }
     }
     
     @RobotKeyword("Returns true if specified user is present in OIM, false otherwise. See `Get Oim User` for more information on usage.")
@@ -389,6 +441,42 @@ public class OimClientLibrary extends AnnotationLibrary {
         oimAccountShouldNotExist(usrkey, appinstname, null, null);
     }
     
+    @RobotKeyword("Returns all role attributes as an all strings dictionary.\n\n" +
+                    "Argument _rolesearchattributes_ is a dictionary.\n\n" +
+                    "Any date typed attributes must be specified and are also returned as _yyyy-MM-dd HH:mm:ss.SSS_, ready to use with [http://robotframework.org/robotframework/latest/libraries/DateTime.html|DateTime].\n\n" +
+                    "Example:\n" +
+                    "| ${searchdict}= | [http://robotframework.org/robotframework/latest/libraries/Collections.html#Create%20Dictionary|Create Dictionary] | Role Name | SYSTEM ADMINISTRATORS |\n" +
+                    "| ${role}= | Get Oim Role | ${searchdict} |\n" + 
+                    "| [http://robotframework.org/robotframework/latest/libraries/BuiltIn.html#Log%20To%20Console|Log To Console] | ${role} |\n" + 
+                    "| ${rolekey}= | [http://robotframework.org/robotframework/latest/libraries/Collections.html#Get%20From%20Dictionary|Get From Dictionary] | ${role} | Role Key |")
+    @ArgumentNames({"rolesearchattributes"})
+    public HashMap<String, String> getOimRole(HashMap<String, String> rolesearchattributes) throws AccessDeniedException, RoleSearchException, ConfigManagerException, NoSuchAttributeException, ParseException  {
+        
+        List<Role> roles = searchRoles(rolesearchattributes);
+       
+        if(roles.isEmpty()) {
+            throw new RuntimeException("No roles in OIM match '"+rolesearchattributes.toString()+"'");
+        } else if(roles.size() > 1) {
+            throw new RuntimeException("Multiple roles in OIM match '"+rolesearchattributes.toString()+"'");
+        } else {
+            Role role = roles.get(0);
+            
+            HashMap<String, String> returnMap = new HashMap<String, String>();
+            for (Map.Entry<String, Object> entry : role.getAttributes().entrySet()) {
+                if(entry.getValue() instanceof Date) {
+                    Date value = (Date) entry.getValue();
+                    returnMap.put(entry.getKey(), timestampDateFormat.format(value));
+                } else if (entry.getValue() != null){
+                    returnMap.put(entry.getKey(), entry.getValue().toString());
+                } else {
+                    returnMap.put(entry.getKey(), "");
+                }
+            }
+            
+            return returnMap;
+        }
+    }
+    
     @RobotKeyword("Returns all user attributes as an all strings dictionary.\n\n" +
                     "Argument _usersearchattributes_ is a dictionary. For default OIM user attribute names see [http://docs.oracle.com/cd/E40329_01/apirefs.1112/e28159/oracle/iam/identity/usermgmt/api/UserManagerConstants.AttributeName.html|UserManagerConstants.AttributeName].\n\n" +
                     "Any date typed attributes must be specified and are also returned as _yyyy-MM-dd HH:mm:ss.SSS_, ready to use with [http://robotframework.org/robotframework/latest/libraries/DateTime.html|DateTime].\n\n" +
@@ -472,6 +560,46 @@ public class OimClientLibrary extends AnnotationLibrary {
         return getOimAccountReturnMap(account);
     }
     
+    @RobotKeyword("Modifies attributes specified in dictionary _modifyattributes_ of role identified by _rolekey_. Returns the modified role (including all attributes) as an all strings dictionary.\n\n" +
+                    "Any date typed attributes must be specified and are also returned as _yyyy-MM-dd HH:mm:ss.SSS_, ready to use with [http://robotframework.org/robotframework/latest/libraries/DateTime.html|DateTime].\n\n" +
+                    "Example:\n" +
+                    "| ${moddict}= | [http://robotframework.org/robotframework/latest/libraries/Collections.html#Create%20Dictionary|Create Dictionary] | Role Display Name | Customer Admin |\n" +
+                    "| ${role}=  | Modify Oim Role | ${rolekey} | ${moddict} |\n" +
+                    "See `Get Oim Role` how to obtain a ${rolekey}.")
+    @ArgumentNames({"rolekey","modifyattributes"})
+    public HashMap<String, String> modifyOimRole(String rolekey, HashMap<String, String> modifyattributes) throws NoSuchAttributeException, ConfigManagerException, ParseException, ValidationFailedException, AccessDeniedException, RoleModifyException, NoSuchRoleException, RoleSearchException {
+        
+        Role roleModify = new Role(rolekey);
+        
+        ConfigManager configManager = oimClient.getService(ConfigManager.class);
+        RoleManager roleManager = oimClient.getService(RoleManager.class);
+        
+        for (Map.Entry<String, String> entry : modifyattributes.entrySet()) {
+            String key = entry.getKey();
+            Object value = entry.getValue();
+            
+            AttributeDefinition attributeDefinition = configManager.getAttribute(Constants.Entity.ROLE, key);
+            if (attributeDefinition.getBackendType().equalsIgnoreCase("date")) {
+                if(!value.toString().isEmpty()) {
+                    value = timestampDateFormat.parse(value.toString());
+                }
+            } else if (attributeDefinition.getBackendType().equalsIgnoreCase("number")) {
+                if(!value.toString().isEmpty()) {
+                    value = Long.valueOf(value.toString());
+                }
+            }
+            roleModify.setAttribute(key, value);
+        }
+        
+        System.out.println("*INFO* Modifying role "+rolekey+" with attributes "+roleModify.toString());
+        
+        roleManager.modify(roleModify);
+        
+        HashMap<String, String> rolesearchattributes = new HashMap<String, String>();
+        rolesearchattributes.put(RoleManagerConstants.RoleAttributeName.KEY.getId(), rolekey);
+        return getOimRole(rolesearchattributes);
+    }
+    
     @RobotKeyword("Modifies attributes specified in dictionary _modifyattributes_ of user identified by _usrkey_. Returns the modified user (including all attributes) as an all strings dictionary.\n\n" +
                     "For default OIM user attribute names see [http://docs.oracle.com/cd/E40329_01/apirefs.1112/e28159/oracle/iam/identity/usermgmt/api/UserManagerConstants.AttributeName.html|UserManagerConstants.AttributeName].\n\n" +
                     "Any date typed attributes must be specified and are also returned as _yyyy-MM-dd HH:mm:ss.SSS_, ready to use with [http://robotframework.org/robotframework/latest/libraries/DateTime.html|DateTime].\n\n" +
@@ -538,25 +666,25 @@ public class OimClientLibrary extends AnnotationLibrary {
         }
     }
    
-    @RobotKeyword("Fail if given rolename is not present in OIM.")
-    @ArgumentNames({"rolename"})
-    public void oimRoleShouldExist(String rolename) throws AccessDeniedException, RoleSearchException {
+    @RobotKeyword("Fail if role is not present in OIM. See `Get Oim Role` for more information on usage.")
+    @ArgumentNames({"rolesearchattributes"})
+    public void oimRoleShouldExist(HashMap<String, String> rolesearchattributes) throws AccessDeniedException, RoleSearchException, NoSuchAttributeException, ConfigManagerException, ParseException {
        
-        List<Role> roles = searchRoles(rolename);
+        List<Role> roles = searchRoles(rolesearchattributes);
        
         if(roles.isEmpty()) {
-            throw new RuntimeException("OIM does not have any role or roles that match the name '"+rolename+"'");
+            throw new RuntimeException("OIM does not have any role that matches '"+rolesearchattributes.toString()+"'");
         }
     }
    
-    @RobotKeyword("Fail if given rolename is present in OIM.")
-    @ArgumentNames({"rolename"})
-    public void oimRoleShouldNotExist(String rolename) throws AccessDeniedException, RoleSearchException {
+    @RobotKeyword("Fail if role is present in OIM. See `Get Oim Role` for more information on usage.")
+    @ArgumentNames({"rolesearchattributes"})
+    public void oimRoleShouldNotExist(HashMap<String, String> rolesearchattributes) throws AccessDeniedException, RoleSearchException, NoSuchAttributeException, ConfigManagerException, ParseException {
        
-        List<Role> roles = searchRoles(rolename);
+        List<Role> roles = searchRoles(rolesearchattributes);
        
         if(roles.size() > 0) {
-            throw new RuntimeException("OIM has one or more roles that match the name '"+rolename+"'");
+            throw new RuntimeException("OIM has one or more roles that match '"+rolesearchattributes.toString()+"'");
         }
     }
    
@@ -635,6 +763,130 @@ public class OimClientLibrary extends AnnotationLibrary {
        
         schedulerService.updateJob(jd);
     }
+    
+    @RobotKeyword("Updates one or more entries in the lookup identified by _lookupcode_. All entries having an encode value that matches _encode_ will be updated to have decode value _decode_.\n\n"+
+                "Examples:\n"+
+                "| `Add Oim Lookup Value` | Lookup.Appl.Config | timeout | 30 | | |\n" +
+                "| `Add Oim Lookup Value` | Lookup.Appl.Config | timeout-single | 30 | | |\n" +
+                "| `Add Oim Lookup Value` | Lookup.Appl.Config | timeout-double | 30 | | |\n" +
+                "| Update Oim Lookup Values | Lookup.Appl.Config | encode=timeout | newdecode=40 | | # change decode value of entry with encode 'timeout' to 40 |\n" +
+                "| Update Oim Lookup Values | Lookup.Appl.Config | encode=timeout* | newdecode=60 | | # change decode value of all entries having an encode value starting with 'timeout' to 60 |\n" +
+                "| Update Oim Lookup Values | Lookup.Appl.Config | encode=timeout | newdecode=70 | newencode=timeout2 | # change decode value of entry having encode 'timeout' to 70, and also change its encode to 'timeout2' |\n" +
+                "| Update Oim Lookup Values | Lookup.Appl.Config | encode=timeout2 | newencode=timeout | | # change encode value back to 'timeout' |\n" +
+                "| Update Oim Lookup Values | Lookup.Appl.Config | decode=60 | newdecode=120 | | # change decode value of all entries having decode value 60 to 120 |\n" +
+                "| Update Oim Lookup Values | Lookup.Appl.Config | decode=* | newdecode=240 | | # change decode value of all entries to 120 |\n" +
+                "| Update Oim Lookup Values | Lookup.Appl.Config | encode=timeout | decode=240 | newdecode=340 | # change decode value of entry having encode 'timeout' and decode '240' to 340 |")
+    @ArgumentNames({"lookupcode","encode=","decode=","newencode=","newdecode="})
+    public void updateOimLookupValues(String lookupcode, String encode, String decode, String newencode, String newdecode) throws tcAPIException, tcInvalidLookupException, tcColumnNotFoundException, tcInvalidAttributeException, tcInvalidValueException {
+        if (oimClient == null) {
+            throw new RuntimeException("There is no connection to OIM");
+        }
+        
+        if((encode == null || encode.isEmpty()) && (decode == null || decode.isEmpty())) {
+            throw new IllegalArgumentException("Either 'encode' or 'decode' or both must be specified.");
+        }
+        if((newencode == null || newencode.isEmpty()) && (newdecode == null || newdecode.isEmpty())) {
+            throw new IllegalArgumentException("Either 'newencode' or 'newdecode' or both must be specified.");
+        }
+        
+        tcLookupOperationsIntf lookupIntf = oimClient.getService(tcLookupOperationsIntf.class);
+        
+        Map<String, String> filter = new HashMap<String, String>(2);
+        if(encode != null && !encode.isEmpty()) {
+            filter.put(LOOKUP_ENCODE_NAME, encode);
+        }
+        if(decode != null && !decode.isEmpty()) {
+            filter.put(LOOKUP_DECODE_NAME, decode);
+        }
+        tcResultSet resultSet = lookupIntf.getLookupValues(lookupcode, filter);
+        
+        System.out.println("*INFO* Found " + resultSet.getRowCount() + " entries in lookup " + lookupcode + " that match " + filter);
+        
+        Map<String, String> updateMap = new HashMap<String, String>(2);
+        for(int i=0; i<resultSet.getRowCount(); i++) {
+            resultSet.goToRow(i);
+            
+            String currentEncode = resultSet.getStringValue(LOOKUP_ENCODE_NAME);
+            String currentDecode = resultSet.getStringValue(LOOKUP_DECODE_NAME);
+            
+            if(newencode == null || newencode.isEmpty()) {
+                updateMap.put(LOOKUP_ENCODE_NAME, currentEncode);
+            } else {
+                updateMap.put(LOOKUP_ENCODE_NAME, newencode);
+            }
+            if(newdecode == null || newdecode.isEmpty()) {
+                updateMap.put(LOOKUP_DECODE_NAME, currentDecode);
+            } else {
+                updateMap.put(LOOKUP_DECODE_NAME, newdecode);
+            }
+            
+            System.out.println("*INFO* Updating encode '"+currentEncode+"' to encode '"+updateMap.get(LOOKUP_ENCODE_NAME)+"' and decode '"+updateMap.get(LOOKUP_DECODE_NAME)+"'");
+            
+            lookupIntf.updateLookupValue(lookupcode, currentEncode, updateMap);
+        }
+    }
+    
+    @RobotKeywordOverload
+    public void updateOimLookupValues(String lookupcode, String encode, String decode, String newencode) throws tcAPIException, tcInvalidLookupException, tcColumnNotFoundException, tcInvalidAttributeException, tcInvalidValueException {
+        updateOimLookupValues(lookupcode, encode, decode, newencode, null);
+    }
+    
+    @RobotKeywordOverload
+    public void updateOimLookupValues(String lookupcode, String encode, String decode) throws tcAPIException, tcInvalidLookupException, tcColumnNotFoundException, tcInvalidAttributeException, tcInvalidValueException {
+        updateOimLookupValues(lookupcode, encode, decode, null, null);
+    }
+    
+    @RobotKeywordOverload
+    public void updateOimLookupValues(String lookupcode, String encode) throws tcAPIException, tcInvalidLookupException, tcColumnNotFoundException, tcInvalidAttributeException, tcInvalidValueException {
+        updateOimLookupValues(lookupcode, encode, null, null, null);
+    }
+    
+    @RobotKeyword("Returns the encode and decode value of the entry identified by _encode_ and/or _decode_ from the lookup identified by _lookupcode_. A single entry should match.\n\n"+
+                "The return value is a dictionary with two keys: 'encode' and 'decode'.\n\n"+
+                "Example:\n"+
+                "| ${lookupvalue}= | Get Oim Lookup Value | Lookup.Appl.Config | encode=timeout |\n" +
+                "| ${encode}= | Get From Dictionary | ${lookupvalue} | encode |\n" +
+                "| ${decode}= | Get From Dictionary | ${lookupvalue} | decode |")
+    @ArgumentNames({"lookupcode","encode=","decode="})
+    public HashMap<String, String> getOimLookupValue(String lookupcode, String encode, String decode) throws tcAPIException, tcInvalidLookupException, tcColumnNotFoundException {
+        if (oimClient == null) {
+            throw new RuntimeException("There is no connection to OIM");
+        }
+        
+        if((encode == null || encode.isEmpty()) && (decode == null || decode.isEmpty())) {
+            throw new IllegalArgumentException("Either 'encode' or 'decode' or both must be specified.");
+        }
+        
+        tcLookupOperationsIntf lookupIntf = oimClient.getService(tcLookupOperationsIntf.class);
+        
+        Map<String, String> filter = new HashMap<String, String>(2);
+        if(encode != null && !encode.isEmpty()) {
+            filter.put(LOOKUP_ENCODE_NAME, encode);
+        }
+        if(decode != null && !decode.isEmpty()) {
+            filter.put(LOOKUP_DECODE_NAME, decode);
+        }
+        tcResultSet resultSet = lookupIntf.getLookupValues(lookupcode, filter);
+        
+        System.out.println("*INFO* Found " + resultSet.getRowCount() + " entries in lookup " + lookupcode + " that match " + encode);
+        
+        if(resultSet.isEmpty()) {
+            throw new RuntimeException("No entry in OIM lookup '"+lookupcode+"' matches "+filter);
+        } else if(resultSet.getRowCount() > 1) {
+            throw new RuntimeException("Multiple entries in OIM lookup '"+lookupcode+"' match "+filter);
+        } else {
+            resultSet.goToRow(0);
+            HashMap<String, String> returnMap = new HashMap<String, String>(2);
+            returnMap.put("encode", resultSet.getStringValue(LOOKUP_ENCODE_NAME));
+            returnMap.put("decode", resultSet.getStringValue(LOOKUP_DECODE_NAME));
+            return returnMap;
+        }
+    }
+    
+    @RobotKeywordOverload
+    public HashMap<String, String> getOimLookupValue(String lookupcode, String encode) throws tcAPIException, tcInvalidLookupException, tcColumnNotFoundException {
+        return getOimLookupValue(lookupcode, encode, null);
+    }
    
     @RobotKeyword("Get a parameter value of an OIM scheduled job.")
     @ArgumentNames({"jobname","paramname"})
@@ -654,6 +906,52 @@ public class OimClientLibrary extends AnnotationLibrary {
         System.out.println("*INFO* Returning value " + jp.getValue().toString());
        
         return jp.getValue().toString();
+    }
+    
+    @RobotKeyword("Removes one or more entries from lookup identified by _lookupcode_. All entries matching _encode_ and _decode_ are removed.\n\n"+
+                "Examples:\n" +
+                "| Delete Oim Lookup Values | Lookup.Appl.Config | encode=timeout | | # Remove entry having encode 'timeout' from lookup |\n" +
+                "| Delete Oim Lookup Values | Lookup.Appl.Config | decode=240 | | # Remove all entries having decode value 240 |\n" +
+                "| Delete Oim Lookup Values | Lookup.Appl.Config | encode=timeout* | | # Remove all entries having encode value that starts with 'timeout' |\n" +
+                "| Delete Oim Lookup Values | Lookup.Appl.Config | encode=timeout | decode=30 | # Remove entry having encode 'timeout' and decode value 30 from lookup |")
+    @ArgumentNames({"lookupcode","encode=","decode="})
+    public void deleteOimLookupValues(String lookupcode, String encode, String decode) throws tcAPIException, tcInvalidLookupException, tcColumnNotFoundException, tcInvalidValueException {
+        if (oimClient == null) {
+            throw new RuntimeException("There is no connection to OIM");
+        }
+        
+        if((encode == null || encode.isEmpty()) && (decode == null || decode.isEmpty())) {
+            throw new IllegalArgumentException("Either 'encode' or 'decode' or both must be specified.");
+        }
+        
+        tcLookupOperationsIntf lookupIntf = oimClient.getService(tcLookupOperationsIntf.class);
+        
+        Map<String, String> filter = new HashMap<String, String>(2);
+        if(encode != null && !encode.isEmpty()) {
+            filter.put(LOOKUP_ENCODE_NAME, encode);
+        }
+        if(decode != null && !decode.isEmpty()) {
+            filter.put(LOOKUP_DECODE_NAME, decode);
+        }
+        tcResultSet resultSet = lookupIntf.getLookupValues(lookupcode, filter);
+        
+        System.out.println("*INFO* Found " + resultSet.getRowCount() + " entries in lookup " + lookupcode + " that match " + filter);
+        
+        for(int i=0; i<resultSet.getRowCount(); i++) {
+            resultSet.goToRow(i);
+            
+            String currentEncode = resultSet.getStringValue(LOOKUP_ENCODE_NAME);
+            String currentDecode = resultSet.getStringValue(LOOKUP_DECODE_NAME);
+            
+            System.out.println("*INFO* Removing encode '"+currentEncode+"' having decode '"+currentDecode+"'");
+            
+            lookupIntf.removeLookupValue(lookupcode, currentEncode);
+        }
+    }
+    
+    @RobotKeywordOverload
+    public void deleteOimLookupValues(String lookupcode, String encode) throws tcAPIException, tcInvalidLookupException, tcColumnNotFoundException, tcInvalidValueException {
+        deleteOimLookupValues(lookupcode, encode, null);
     }
    
     @SuppressWarnings("SleepWhileInLoop")
@@ -825,22 +1123,36 @@ public class OimClientLibrary extends AnnotationLibrary {
         return users;
     }
     
-    private List<Role> searchRoles (String rolename) throws AccessDeniedException, RoleSearchException {
+    private List<Role> searchRoles (HashMap<String, String> rolesearchattributes) throws AccessDeniedException, RoleSearchException, NoSuchAttributeException, ConfigManagerException, ParseException {
         if (oimClient == null) {
             throw new RuntimeException("There is no connection to OIM");
         }
+        
+        ConfigManager configManager = oimClient.getService(ConfigManager.class);
         RoleManager roleManager = oimClient.getService(RoleManager.class);
+        
+        SearchCriteria searchCriteria = null;
+        for (Map.Entry<String, String> entry : rolesearchattributes.entrySet()) {
+            String key = entry.getKey();
+            Object value = entry.getValue();
+            
+            AttributeDefinition attributeDefinition = configManager.getAttribute(Constants.Entity.ROLE, key);
+            if (attributeDefinition.getBackendType().equalsIgnoreCase("date")) {
+                value = timestampDateFormat.parse(value.toString());
+            } else if (attributeDefinition.getBackendType().equalsIgnoreCase("number")) {
+                value = Long.valueOf(value.toString());
+            }
+            
+            if(searchCriteria == null) {
+                searchCriteria = new SearchCriteria(key, value, SearchCriteria.Operator.EQUAL);
+            } else {
+                searchCriteria = new SearchCriteria(searchCriteria, new SearchCriteria(key, value, SearchCriteria.Operator.EQUAL), SearchCriteria.Operator.AND);
+            }
+        }
+        
+        System.out.println("*INFO* Searching for roles matching '"+searchCriteria+"'");
        
-        Set<String> retAttrs = new HashSet<String>();
-        retAttrs.add(RoleAttributeName.KEY.getId());
-        retAttrs.add(RoleAttributeName.NAME.getId());
-       
-        System.out.println("*INFO* Searching for role having name '"+rolename+"'");
-       
-        List<Role> roles = roleManager.search(
-                            new SearchCriteria(RoleAttributeName.NAME.getId(), rolename, SearchCriteria.Operator.EQUAL),
-                            retAttrs,
-                            null);
+        List<Role> roles = roleManager.search(searchCriteria, null, null);
        
         return roles;
     }
