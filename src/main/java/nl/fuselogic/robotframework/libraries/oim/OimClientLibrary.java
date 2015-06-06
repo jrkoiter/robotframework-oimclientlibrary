@@ -114,6 +114,7 @@ public class OimClientLibrary extends AnnotationLibrary {
     private static enum JobStatus { SHUTDOWN, STARTED, STOPPED, NONE, PAUSED, RUNNING, FAILED, INTERRUPT }
    
     private OIMClient oimClient;
+    private String oimUrl;
     
     private static SimpleDateFormat timestampDateFormat = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS");
     
@@ -158,22 +159,26 @@ public class OimClientLibrary extends AnnotationLibrary {
     public synchronized void connectToOim(String username, String password, String url) throws LoginException {
         
         if(oimClient != null) {
-            try {
-                // Check if connection is still valid by getting user details
-                AuthenticatedSelfService authenticatedSelfService = oimClient.getService(AuthenticatedSelfService.class);
-                Set<String> retAttrs = new HashSet<String>();
-                retAttrs.add(UserManagerConstants.AttributeName.USER_LOGIN.getId());
-                User user = authenticatedSelfService.getProfileDetails(retAttrs);
-                
-                if(user.getLogin().equalsIgnoreCase(username)) {
-                    System.out.println("*WARN* There is already a connection to OIM");
-                    return;
-                } else {
-                    System.out.println("*WARN* There is already a connection to OIM as user "+user.getLogin()+". Going to reconnect as user "+username+".");
+            if(!this.oimUrl.equals(url)) {
+                System.out.println("*WARN* There is already a connection to OIM at url "+this.oimUrl+". Going to reconnect to "+url+".");
+            } else {
+                try {
+                    // Check if connection is still valid by getting user details
+                    AuthenticatedSelfService authenticatedSelfService = oimClient.getService(AuthenticatedSelfService.class);
+                    Set<String> retAttrs = new HashSet<String>();
+                    retAttrs.add(UserManagerConstants.AttributeName.USER_LOGIN.getId());
+                    User user = authenticatedSelfService.getProfileDetails(retAttrs);
+
+                    if(user.getLogin().equalsIgnoreCase(username)) {
+                        System.out.println("*INFO* There is already a connection to OIM");
+                        return;
+                    } else {
+                        System.out.println("*WARN* There is already a connection to OIM as user "+user.getLogin()+". Going to reconnect as user "+username+".");
+                    }
+                } catch (Exception e) {
+                    System.out.println("*TRACE* Got exception "+e.getClass().getName()+ ". Message: " +e.getMessage());
+                    System.out.println("*WARN* There is already a connection to OIM, but it might be stale. Going to reconnect.");
                 }
-            } catch (Exception e) {
-                System.out.println("*TRACE* Got exception "+e.getClass().getName()+ ". Message: " +e.getMessage());
-                System.out.println("*WARN* There is already a connection to OIM, but it might be stale. Going to reconnect.");
             }
         }
         
@@ -185,6 +190,8 @@ public class OimClientLibrary extends AnnotationLibrary {
        
         oimClient = new OIMClient(env);
         oimClient.login(username, password.toCharArray());
+        
+        oimUrl = url;
     }
    
     @RobotKeyword("Disconnect from OIM")
