@@ -24,7 +24,12 @@ import Thor.API.Exceptions.tcInvalidLookupException;
 import Thor.API.Exceptions.tcInvalidValueException;
 import Thor.API.Operations.tcAccessPolicyOperationsIntf;
 import Thor.API.Operations.tcLookupOperationsIntf;
+import Thor.API.Security.XLClientSecurityAssociation;
 import Thor.API.tcResultSet;
+import com.thortech.xl.dataaccess.tcDataBaseClient;
+import com.thortech.xl.dataaccess.tcDataProvider;
+import com.thortech.xl.dataaccess.tcDataSetException;
+import com.thortech.xl.dataobj.tcDataSet;
 
 import java.io.InputStream;
 
@@ -45,6 +50,11 @@ import java.util.Scanner;
 import java.util.Set;
 
 import javax.security.auth.login.LoginException;
+import oracle.iam.accesspolicy.api.AccessPolicyServiceInternal;
+import oracle.iam.accesspolicy.exception.AccessPolicyEvaluationException;
+import oracle.iam.accesspolicy.exception.AccessPolicyEvaluationUnauthorizedException;
+import oracle.iam.accesspolicy.exception.AccessPolicyServiceException;
+import oracle.iam.accesspolicy.exception.UserNotActiveException;
 import oracle.iam.configservice.api.ConfigManager;
 import oracle.iam.configservice.api.Constants;
 import oracle.iam.configservice.exception.ConfigManagerException;
@@ -56,15 +66,16 @@ import oracle.iam.identity.exception.RoleDeleteException;
 import oracle.iam.identity.exception.RoleModifyException;
 
 import oracle.iam.identity.exception.RoleSearchException;
+import oracle.iam.identity.exception.SearchKeyNotUniqueException;
 import oracle.iam.identity.exception.UserDeleteException;
 import oracle.iam.identity.exception.UserDisableException;
 import oracle.iam.identity.exception.UserLookupException;
+import oracle.iam.identity.exception.UserManagerException;
 import oracle.iam.identity.exception.UserModifyException;
 import oracle.iam.identity.exception.UserSearchException;
 import oracle.iam.identity.exception.ValidationFailedException;
 import oracle.iam.identity.rolemgmt.api.RoleManager;
 import oracle.iam.identity.rolemgmt.api.RoleManagerConstants;
-import oracle.iam.identity.rolemgmt.api.RoleManagerConstants.RoleAttributeName;
 import oracle.iam.identity.rolemgmt.vo.Role;
 import oracle.iam.identity.usermgmt.api.UserManager;
 import oracle.iam.identity.usermgmt.api.UserManagerConstants;
@@ -112,6 +123,8 @@ public class OimClientLibrary extends AnnotationLibrary {
     public static final String ROBOT_LIBRARY_VERSION = "0.2";
    
     private static enum JobStatus { SHUTDOWN, STARTED, STOPPED, NONE, PAUSED, RUNNING, FAILED, INTERRUPT }
+    
+    private static enum ProcessStatus { WAITING,  ABANDONED,  COMPLETED,  MANUAL_COMPLETED,  ACTIVE,  FAILED,  CANCELLED,  PENDING_CANCELLED,  PENDING_CANCELLED_WITH_COMPENSATION,  CANCELLED_WITH_COMPENSATION,  COMPENSATED,  RESTARTED }
    
     private OIMClient oimClient;
     private String oimUrl;
@@ -120,6 +133,8 @@ public class OimClientLibrary extends AnnotationLibrary {
     
     private static String LOOKUP_ENCODE_NAME= "Lookup Definition.Lookup Code Information.Code Key";
     private static String LOOKUP_DECODE_NAME= "Lookup Definition.Lookup Code Information.Decode";
+    
+    private static int maxWaitSeconds = 1800;
    
     public OimClientLibrary(List<String> list) {
         super(list);
@@ -155,12 +170,14 @@ public class OimClientLibrary extends AnnotationLibrary {
     }
    
     @RobotKeyword("Make a connection to OIM")
-    @ArgumentNames({"username", "password", "url"})
-    public synchronized void connectToOim(String username, String password, String url) throws LoginException {
+    @ArgumentNames({"username", "password", "url", "warnonreconnect="})
+    public synchronized void connectToOim(String username, String password, String url, Boolean warnonreconnect) throws LoginException {
+        
+        String reconnectLogLevel = (warnonreconnect) ? "*WARN*":"*INFO*";
         
         if(oimClient != null) {
             if(!this.oimUrl.equals(url)) {
-                System.out.println("*WARN* There is already a connection to OIM at url "+this.oimUrl+". Going to reconnect to "+url+".");
+                System.out.println(reconnectLogLevel+" There is already a connection to OIM at url "+this.oimUrl+". Going to reconnect to "+url+".");
             } else {
                 try {
                     // Check if connection is still valid by getting user details
@@ -173,17 +190,19 @@ public class OimClientLibrary extends AnnotationLibrary {
                         System.out.println("*INFO* There is already a connection to OIM");
                         return;
                     } else {
-                        System.out.println("*WARN* There is already a connection to OIM as user "+user.getLogin()+". Going to reconnect as user "+username+".");
+                        System.out.println(reconnectLogLevel+" There is already a connection to OIM as user "+user.getLogin()+". Going to reconnect as user "+username+".");
                     }
                 } catch (Exception e) {
                     System.out.println("*TRACE* Got exception "+e.getClass().getName()+ ". Message: " +e.getMessage());
-                    System.out.println("*WARN* There is already a connection to OIM, but it might be stale. Going to reconnect.");
+                    System.out.println(reconnectLogLevel+" There is already a connection to OIM, but it might be stale. Going to reconnect as user "+username+".");
                 }
             }
         }
         
         System.out.println("*INFO* Connecting to "+url+" as "+username);
-       
+        
+        oimUrl = url;
+        
         Hashtable env = new Hashtable();
         env.put(OIMClient.JAVA_NAMING_FACTORY_INITIAL, OIMClient.WLS_CONTEXT_FACTORY);
         env.put(OIMClient.JAVA_NAMING_PROVIDER_URL, url);
@@ -191,7 +210,12 @@ public class OimClientLibrary extends AnnotationLibrary {
         oimClient = new OIMClient(env);
         oimClient.login(username, password.toCharArray());
         
-        oimUrl = url;
+        XLClientSecurityAssociation.setClientHandle(oimClient);
+    }
+    
+    @RobotKeywordOverload
+    public synchronized void connectToOim(String username, String password, String url) throws LoginException {
+        connectToOim(username, password, url, true);
     }
    
     @RobotKeyword("Disconnect from OIM")
@@ -326,6 +350,176 @@ public class OimClientLibrary extends AnnotationLibrary {
             return true;
         } else {
             throw new RuntimeException("Multiple users in OIM match '"+usersearchattributes.toString()+"'");
+        }
+    }
+    
+    @RobotKeyword("Waits for all orchestration processes identified by the (all optional) keyword arguments to finish.\n\n" +
+        "Optional argument _entityid_ specifies the OIM internal key of the entity. For example a usr_key or ugp_key, depending on the _entitytype_.\n\n" +
+        "Optional argument _entitytype_ specifies the type of OIM entity. For example 'User', 'Role', 'RoleUser', etc.\n\n" +
+        "Optional argument _operation_ specifies the OIM operation. For example 'CREATE', 'MODIFY', 'DELETE', etc.\n\n" +
+        "Optional argument _createdafter_ specifies a timestamp on or after which the orchestration(s) must have started. The format must be _yyyy-MM-dd HH:mm:ss.SSS_.\n\n" +
+        "Optional argument _createdbefore_ specifies a timestamp on or before which the orchestration(s) must have started. The format must be _yyyy-MM-dd HH:mm:ss.SSS_.\n\n" +
+        "Examples:\n" +
+        "| Wait For Oim Orchestrations To Complete | | | | # Wait for all orchestration to finish (this is probably not what you want to use, especially on a busy system) |\n" +
+        "| Wait For Oim Orchestrations To Complete | entityid=${usrkey} | entitytype=User | | # Wait for all orchestrations regarding user with key ${usrkey} to finish |\n" +
+        "| Wait For Oim Orchestrations To Complete | entityid=${usrkey} | entitytype=User | operation=CREATE | # Wait for all orchestrations regarding creation of user with key ${usrkey} to finish |\n" +
+        "| |\n" +
+        "| ${now}= | Get Current Date |\n" +
+        "| ${one minute ago}= | Get Current Date | increment=- 1 minute |\n" +
+        "| Wait For Oim Orchestrations To Complete | createdbefore=${now} | | | # Wait for all orchestration created until now to finish |\n" +
+        "| Wait For Oim Orchestrations To Complete | createdafter=${one minute ago} | createdbefore=${now} | | # Wait for all orchestration created in the last minute to finish |\n" +
+        "| Wait For Oim Orchestrations To Complete | entityid=${usrkey} | entitytype=User | createdafter=${one minute ago} | # Wait for all orchestration created in the last minute regarding user with key ${usrkey} to finish |\n" +
+        "See `Get Oim User` how to obtain _usrkey_.")
+    @ArgumentNames({"entityid=", "entitytype=", "operation=", "createdafter=", "createdbefore="})
+    public void waitForOimOrchestrationsToComplete(String entityId, String entityType, String operation, String createdAfter, String createdBefore) throws tcDataSetException, InterruptedException {
+        if (oimClient == null) {
+            throw new RuntimeException("There is no connection to OIM");
+        }
+        
+        if(entityId != null && entityId.isEmpty()) {
+            entityId = null;
+        }
+        if(entityType != null && entityType.isEmpty()) {
+            entityType = null;
+        }
+        if(operation != null && operation.isEmpty()) {
+            operation = null;
+        }
+        if(createdAfter != null && createdAfter.isEmpty()) {
+            createdAfter = null;
+        }
+        if(createdBefore != null && createdBefore.isEmpty()) {
+            createdBefore = null;
+        }
+        
+        String orchprocessQuery = "SELECT id, status FROM orchprocess";
+        
+        if(entityId != null || entityType != null || operation != null || createdAfter != null || createdBefore != null) {
+            orchprocessQuery = orchprocessQuery + " START WITH 1=1";
+            
+            if(entityId != null) {
+                orchprocessQuery = orchprocessQuery + " AND entityid='" + entityId + "'";
+            }
+            if(entityType != null) {
+                orchprocessQuery = orchprocessQuery + " AND entitytype='" + entityType + "'";
+            }
+            if(operation != null) {
+                orchprocessQuery = orchprocessQuery + " AND operation='" + operation + "'";
+            }
+            if(createdAfter != null) {
+                orchprocessQuery = orchprocessQuery + " AND createdon >= TO_TIMESTAMP('" + createdAfter + "', 'YYYY-MM-DD HH24:MI:SS.FF')";
+            }
+            if(createdBefore != null) {
+                orchprocessQuery = orchprocessQuery + " AND createdon <= TO_TIMESTAMP('" + createdBefore + "', 'YYYY-MM-DD HH24:MI:SS.FF')";
+            }
+            
+            orchprocessQuery = orchprocessQuery + " CONNECT BY PRIOR id = parentprocessid";
+        }
+        
+        tcDataProvider dbProvider = new tcDataBaseClient();
+        tcDataSet dataSet = new tcDataSet();
+        
+        System.out.println("*INFO* Waiting for any orchestration processes to show up");
+        System.out.println("*TRACE* Constructed SQL query: "+orchprocessQuery);
+        
+        dataSet.setQuery(dbProvider, orchprocessQuery);
+        dataSet.executeQuery();
+        int waited = 0;
+        while (dataSet.getTotalRowCount() == 0) {
+            if(waited == maxWaitSeconds) {
+                throw new RuntimeException("Maximum waiting time of " + maxWaitSeconds + " seconds reached");
+            }
+
+            Thread.sleep(1000); // 1 second
+            waited++;
+            dataSet.refresh();
+        }
+        
+        String activeOrchprocessQuery = "SELECT * FROM (" + orchprocessQuery + ") WHERE status IN ('" + ProcessStatus.WAITING.name() + "', '" + ProcessStatus.ACTIVE.name() + "', '" + ProcessStatus.PENDING_CANCELLED.name() + "', '" + ProcessStatus.PENDING_CANCELLED_WITH_COMPENSATION.name() + "')";
+        
+        System.out.println("*INFO* Waiting for the orchestration processes to finish");
+        System.out.println("*TRACE* Constructed SQL query: "+activeOrchprocessQuery);
+        dataSet.setQuery(dbProvider, activeOrchprocessQuery);
+        dataSet.executeQuery();
+        while (dataSet.getTotalRowCount() != 0) {
+            System.out.println("*TRACE* Number of active orchestration processes found: "+dataSet.getTotalRowCount());
+            
+            if(waited == maxWaitSeconds) {
+                throw new RuntimeException("Maximum waiting time of " + maxWaitSeconds + " seconds reached");
+            }
+            
+            Thread.sleep(1000); // 1 second
+            waited++;
+            dataSet.refresh();
+        }
+    }
+    
+    @RobotKeywordOverload
+    public void waitForOimOrchestrationsToComplete(String entityId, String entityType, String operation, String createdAfter) throws tcDataSetException, InterruptedException {
+        waitForOimOrchestrationsToComplete(entityId, entityType, operation, createdAfter, null);
+    }
+    
+    @RobotKeywordOverload
+    public void waitForOimOrchestrationsToComplete(String entityId, String entityType, String operation) throws tcDataSetException, InterruptedException {
+        waitForOimOrchestrationsToComplete(entityId, entityType, operation, null, null);
+    }
+    
+    @RobotKeywordOverload
+    public void waitForOimOrchestrationsToComplete(String entityId, String entityType) throws tcDataSetException, InterruptedException {
+        waitForOimOrchestrationsToComplete(entityId, entityType, null, null, null);
+    }
+    
+    @RobotKeywordOverload
+    public void waitForOimOrchestrationsToComplete(String entityId) throws tcDataSetException, InterruptedException {
+        waitForOimOrchestrationsToComplete(entityId, null, null, null, null);
+    }
+    
+    @RobotKeywordOverload
+    public void waitForOimOrchestrationsToComplete() throws tcDataSetException, InterruptedException {
+        waitForOimOrchestrationsToComplete(null, null, null, null, null);
+    }
+    
+    @RobotKeyword("Evaluates the access policies for the user specified by _usrkey_.\n\n" +
+        "This keyword returns when the evaluation process in OIM has completed.\n\n" +
+        "See `Get Oim User` how to obtain _usrkey_.")
+    @ArgumentNames({"usrkey"})
+    public void evaluateOimAccessPoliciesForUser(String usrKey) throws NoSuchUserException, UserNotActiveException, AccessPolicyEvaluationUnauthorizedException, AccessPolicyServiceException, AccessPolicyEvaluationException, tcDataSetException, InterruptedException {
+        if (oimClient == null) {
+            throw new RuntimeException("There is no connection to OIM");
+        }
+        
+        tcDataProvider dbProvider = new tcDataBaseClient();
+        tcDataSet dataSet = new tcDataSet();
+        
+        dataSet.setQuery(dbProvider, "SELECT * FROM user_provisioning_attrs WHERE usr_key = "+usrKey+" AND policy_eval_needed = 1");
+        dataSet.executeQuery();
+        if(dataSet.getTotalRowCount() != 1) {
+            System.out.println("*WARN* No policy evaluation required for user "+usrKey);
+            return;
+        }
+        
+        dataSet.setQuery(dbProvider, "SELECT to_char(sysdate, 'yyyymmddHH24MISS') FROM dual");
+        dataSet.executeQuery();
+        dataSet.goToRow(0);
+        String startTimestamp = dataSet.getString(0);
+        
+        AccessPolicyServiceInternal accessPolicyServiceInternal = oimClient.getService(AccessPolicyServiceInternal.class);
+        ContextManager.pushContext(null, ContextManager.ContextTypes.ADMIN, null);
+        ContextManager.setValue("operationInitiator", new ContextAwareString("scheduler"), true);
+        accessPolicyServiceInternal.evaluatePoliciesForUser(usrKey);
+        ContextManager.popContext();
+        
+        dataSet.setQuery(dbProvider, "SELECT * FROM user_provisioning_attrs WHERE usr_key = "+usrKey+" AND policy_eval_needed = 0 AND policy_eval_in_progress = 0 AND update_date >= to_timestamp('"+startTimestamp+"', 'yyyymmddHH24MISS')");
+        dataSet.executeQuery();
+        int waited = 0;
+        while (dataSet.getTotalRowCount() == 0) {
+            if(waited == maxWaitSeconds) {
+                throw new RuntimeException("Maximum waiting time of " + maxWaitSeconds + " seconds reached");
+            }
+            
+            Thread.sleep(1000); // 1 second
+            waited++;
+            dataSet.refresh();
         }
     }
     
@@ -833,6 +1027,14 @@ public class OimClientLibrary extends AnnotationLibrary {
         }
     }
     
+    @RobotKeyword("Set the password of user identified by _usrkey_ to _newpassword_. See `Get Oim User` how to obtain a ${usrkey}.")
+    @ArgumentNames({"usrkey","newpassword"})
+    public void setOimUserPassword(String usrkey, String newpassword) throws AccessDeniedException, UserManagerException, NoSuchUserException, SearchKeyNotUniqueException {
+        
+        UserManager userManager = oimClient.getService(UserManager.class);
+        userManager.changePassword(UserManagerConstants.AttributeName.USER_KEY.getId(), usrkey, newpassword.toCharArray(), false);
+    }
+    
     @RobotKeywordOverload
     public void updateOimLookupValues(String lookupcode, String encode, String decode, String newencode) throws tcAPIException, tcInvalidLookupException, tcColumnNotFoundException, tcInvalidAttributeException, tcInvalidValueException {
         updateOimLookupValues(lookupcode, encode, decode, newencode, null);
@@ -1069,7 +1271,7 @@ public class OimClientLibrary extends AnnotationLibrary {
                     
                     Object formValue = parentFormData.get(searchKey);
                     
-                    String strFormValue = null;
+                    String strFormValue;
                     
                     if(formValue == null) {
                         strFormValue = "";

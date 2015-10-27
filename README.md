@@ -56,6 +56,7 @@ Usage
 		wlfullclient.jar
 		oimclient.jar
 		/path/to/oimclient/lib/*
+        iam-platform-utils.jar
 
 6. Alternatively, deploy "OimClientLibrary" to a [jrobotremoteserver](https://github.com/ombre42/jrobotremoteserver), and keep running your tests in pybot. Library definition in your tests will then be something like:
         
