@@ -425,9 +425,11 @@ public class OimClientLibrary extends AnnotationLibrary {
         dataSet.setQuery(dbProvider, orchprocessQuery);
         dataSet.executeQuery();
         int waited = 0;
+        int maxInitialWaitSeconds = 30;
         while (dataSet.getTotalRowCount() == 0) {
-            if(waited == maxWaitSeconds) {
-                throw new RuntimeException("Maximum waiting time of " + maxWaitSeconds + " seconds reached");
+            if(waited == maxInitialWaitSeconds) {
+                System.out.println("*WARN* No matching orchestration processes found within " + maxInitialWaitSeconds + " seconds, continuing");
+                return;
             }
 
             Thread.sleep(1000); // 1 second
