@@ -305,6 +305,7 @@ public class OimClientLibrary extends AnnotationLibrary {
             User userModify = new User(usrkey);
             userModify.setAttribute(UserManagerConstants.AttributeName.AUTOMATICALLY_DELETED_ON.getId(), cal.getTime());
             userManager.modify(userModify);
+            waitForOimOrchestrationsToComplete(usrkey, "User");
             
             // UserManager API delete operation will only execute a delayed delete
             // if context parameter "operationinitiator" is set to "scheduler".
