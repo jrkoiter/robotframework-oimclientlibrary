@@ -277,7 +277,7 @@ public class OimClientLibrary extends AnnotationLibrary {
                     "Set _force_ to True if immediate deletion is required, even if OIM system property _XL.UserDeleteDelayPeriod_ is set to a non-zero value. If mentioned system property is set to zero,  _force_  has no effect: the deletion will always be immediate.\n\n"+
                     "See `Get Oim User` how to obtain a ${usrkey}.")
     @ArgumentNames({"usrkey","force="})
-    public void deleteOimUser(String usrkey, boolean force) throws ValidationFailedException, AccessDeniedException, UserModifyException, NoSuchUserException, UserDeleteException, UserDisableException, UserLookupException {
+    public void deleteOimUser(String usrkey, boolean force) throws ValidationFailedException, AccessDeniedException, UserModifyException, NoSuchUserException, UserDeleteException, UserDisableException, UserLookupException, tcDataSetException, InterruptedException {
         if (oimClient == null) {
             throw new RuntimeException("There is no connection to OIM");
         }
@@ -293,6 +293,7 @@ public class OimClientLibrary extends AnnotationLibrary {
             
             if(!user.getStatus().equals(UserManagerConstants.AttributeValues.USER_STATUS_DISABLED.getId())) {
                 userManager.disable(usrkey, false);
+                waitForOimOrchestrationsToComplete(usrkey, "User");
             }
             
             Calendar cal = Calendar.getInstance();
@@ -319,7 +320,7 @@ public class OimClientLibrary extends AnnotationLibrary {
     }
     
     @RobotKeywordOverload
-    public void deleteOimUser(String usrkey) throws ValidationFailedException, AccessDeniedException, UserModifyException, NoSuchUserException, UserDeleteException, UserDisableException, UserLookupException {
+    public void deleteOimUser(String usrkey) throws ValidationFailedException, AccessDeniedException, UserModifyException, NoSuchUserException, UserDeleteException, UserDisableException, UserLookupException, tcDataSetException, InterruptedException {
         deleteOimUser(usrkey, false);
     }
     
