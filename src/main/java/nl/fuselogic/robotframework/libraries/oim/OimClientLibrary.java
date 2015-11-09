@@ -445,6 +445,7 @@ public class OimClientLibrary extends AnnotationLibrary {
         System.out.println("*TRACE* Constructed SQL query: "+activeOrchprocessQuery);
         dataSet.setQuery(dbProvider, activeOrchprocessQuery);
         dataSet.executeQuery();
+        waited = 0;
         while (dataSet.getTotalRowCount() != 0) {
             System.out.println("*TRACE* Number of active orchestration processes found: "+dataSet.getTotalRowCount());
             
