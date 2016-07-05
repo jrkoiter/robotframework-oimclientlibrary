@@ -134,7 +134,7 @@ public class OimClientLibrary extends AnnotationLibrary {
     private static String LOOKUP_ENCODE_NAME= "Lookup Definition.Lookup Code Information.Code Key";
     private static String LOOKUP_DECODE_NAME= "Lookup Definition.Lookup Code Information.Decode";
     
-    private static int maxWaitSeconds = 1800;
+    private static int maxWaitSeconds = 300;
    
     public OimClientLibrary(List<String> list) {
         super(list);
@@ -286,26 +286,42 @@ public class OimClientLibrary extends AnnotationLibrary {
         
         System.out.println("*INFO* Deleting user "+usrkey);
         
+        Calendar cal;
+        
         if(force) {
             User user = userManager.getDetails(usrkey, null, false);
             
             System.out.println("*INFO* Bypassing any delayed delete configuration in OIM");
             
             if(!user.getStatus().equals(UserManagerConstants.AttributeValues.USER_STATUS_DISABLED.getId())) {
+                cal = Calendar.getInstance();
+                cal.add(Calendar.SECOND, -10);
+                Date start = cal.getTime();
                 userManager.disable(usrkey, false);
-                waitForOimOrchestrationsToComplete(usrkey, "User");
+                cal = Calendar.getInstance();
+                cal.add(Calendar.SECOND, 10);
+                Date end = cal.getTime();
+                waitForOimOrchestrationsToComplete(usrkey, "User", null, this.timestampDateFormat.format(start), this.timestampDateFormat.format(end));
             }
             
-            Calendar cal = Calendar.getInstance();
+            cal = Calendar.getInstance();
             cal.set(Calendar.HOUR_OF_DAY, 0);
             cal.set(Calendar.MINUTE, 0);
             cal.set(Calendar.SECOND, 0);
             cal.set(Calendar.MILLISECOND, 0);
+            Date autoDeleteDate = cal.getTime();
             
             User userModify = new User(usrkey);
-            userModify.setAttribute(UserManagerConstants.AttributeName.AUTOMATICALLY_DELETED_ON.getId(), cal.getTime());
+            userModify.setAttribute(UserManagerConstants.AttributeName.AUTOMATICALLY_DELETED_ON.getId(), autoDeleteDate);
+            
+            cal = Calendar.getInstance();
+            cal.add(Calendar.SECOND, -10);
+            Date start = cal.getTime();
             userManager.modify(userModify);
-            waitForOimOrchestrationsToComplete(usrkey, "User");
+            cal = Calendar.getInstance();
+            cal.add(Calendar.SECOND, 10);
+            Date end = cal.getTime();
+            waitForOimOrchestrationsToComplete(usrkey, "User", null, this.timestampDateFormat.format(start), this.timestampDateFormat.format(end));
             
             // UserManager API delete operation will only execute a delayed delete
             // if context parameter "operationinitiator" is set to "scheduler".
@@ -313,7 +329,14 @@ public class OimClientLibrary extends AnnotationLibrary {
             ContextManager.setValue("operationinitiator", new ContextAwareString("scheduler"), true);
         }
         
+        cal = Calendar.getInstance();
+        cal.add(Calendar.SECOND, -10);
+        Date start = cal.getTime();
         userManager.delete(usrkey, false);
+        cal = Calendar.getInstance();
+        cal.add(Calendar.SECOND, 10);
+        Date end = cal.getTime();
+        waitForOimOrchestrationsToComplete(usrkey, "User", null, this.timestampDateFormat.format(start), this.timestampDateFormat.format(end));
         
         if (force) {
             ContextManager.popContext();
@@ -570,17 +593,19 @@ public class OimClientLibrary extends AnnotationLibrary {
         HashMap<String, String> returnMap = new HashMap<String, String>();
         returnMap.put("accountid", account.getAccountID());
         returnMap.put("accountstatus", account.getAccountStatus());
-        for (Map.Entry<String, Object> entry : account.getAccountData().getData().entrySet()) {
-            if(entry.getValue() instanceof Date) {
-                Date value = (Date) entry.getValue();
-                returnMap.put(entry.getKey(), timestampDateFormat.format(value));
-            } else if (entry.getValue() instanceof Timestamp) {
-                Timestamp value = (Timestamp) entry.getValue();
-                returnMap.put(entry.getKey(), timestampDateFormat.format(new Date(value.getTime())));
-            } else if (entry.getValue() != null){
-                returnMap.put(entry.getKey(), entry.getValue().toString());
-            } else {
-                returnMap.put(entry.getKey(), "");
+        if(account.getAccountData() != null) {
+            for (Map.Entry<String, Object> entry : account.getAccountData().getData().entrySet()) {
+                if(entry.getValue() instanceof Date) {
+                    Date value = (Date) entry.getValue();
+                    returnMap.put(entry.getKey(), timestampDateFormat.format(value));
+                } else if (entry.getValue() instanceof Timestamp) {
+                    Timestamp value = (Timestamp) entry.getValue();
+                    returnMap.put(entry.getKey(), timestampDateFormat.format(new Date(value.getTime())));
+                } else if (entry.getValue() != null){
+                    returnMap.put(entry.getKey(), entry.getValue().toString());
+                } else {
+                    returnMap.put(entry.getKey(), "");
+                }
             }
         }
         return returnMap;
@@ -1267,6 +1292,12 @@ public class OimClientLibrary extends AnnotationLibrary {
                 Account account = i.next();
                 
                 System.out.println("*TRACE* Handling account "+account.getAccountID());
+                
+                if(account.getAccountData() == null) {
+                    System.out.println("*TRACE* Excluding account "+account.getAccountID()+" because it has no form data");
+                    i.remove();
+                    continue;
+                }
                 
                 Map<String, Object> parentFormData = account.getAccountData().getData();
                 
