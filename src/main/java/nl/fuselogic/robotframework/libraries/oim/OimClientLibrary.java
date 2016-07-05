@@ -120,7 +120,7 @@ import org.robotframework.javalib.library.AnnotationLibrary;
 @RobotKeywords
 public class OimClientLibrary extends AnnotationLibrary {
    
-    public static final String ROBOT_LIBRARY_VERSION = "0.2";
+    public static final String ROBOT_LIBRARY_VERSION = "0.3";
    
     private static enum JobStatus { SHUTDOWN, STARTED, STOPPED, NONE, PAUSED, RUNNING, FAILED, INTERRUPT }
     
