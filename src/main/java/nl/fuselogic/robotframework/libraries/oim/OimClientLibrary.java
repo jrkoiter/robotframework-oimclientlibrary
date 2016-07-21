@@ -37,6 +37,7 @@ import java.sql.Timestamp;
 import java.text.ParseException;
 
 import java.text.SimpleDateFormat;
+import java.util.ArrayList;
 import java.util.Calendar;
 
 import java.util.Date;
@@ -48,6 +49,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Scanner;
 import java.util.Set;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 import javax.security.auth.login.LoginException;
 import oracle.iam.accesspolicy.api.AccessPolicyServiceInternal;
@@ -95,6 +98,7 @@ import oracle.iam.provisioning.exception.GenericProvisioningException;
 import oracle.iam.provisioning.exception.UserNotFoundException;
 import oracle.iam.provisioning.vo.Account;
 import oracle.iam.provisioning.vo.ApplicationInstance;
+import oracle.iam.provisioning.vo.ChildTableRecord;
 import oracle.iam.provisioning.vo.EntitlementInstance;
 import oracle.iam.scheduler.api.SchedulerService;
 import oracle.iam.scheduler.exception.IncorrectScheduleTaskDefinationException;
@@ -135,6 +139,8 @@ public class OimClientLibrary extends AnnotationLibrary {
     private static String LOOKUP_DECODE_NAME= "Lookup Definition.Lookup Code Information.Decode";
     
     private static int maxWaitSeconds = 300;
+    
+    private static Pattern itResourcePrefixPattern = Pattern.compile("^(\\d+~)");
    
     public OimClientLibrary(List<String> list) {
         super(list);
@@ -259,6 +265,114 @@ public class OimClientLibrary extends AnnotationLibrary {
         }
     }
     
+    @RobotKeyword("Fails if specified account does not have specified child form entries.\n\n" +
+                "Argument _multiplesearchcriteria_ must be a list of dictionaries, where each dictionary must match exactly one unique child form entry. Also see `Oim Account Should Have Child Form Entry`.\n\n" + 
+                "The total number of entries in the child form must be equal to the number of dictionaries provided in list _multiplesearchcriteria_.\n\n" +
+                "Any internal OIM prefix consisting of one ore more digits followed by a tilde (~) is discarded during value comparisons.\n\n" +
+                "Example:\n" +
+                "| ${searchdict}= | [http://robotframework.org/robotframework/latest/libraries/Collections.html#Create%20Dictionary|Create Dictionary] | UD_DUM_ENT_ENTNAME=Write |\n" +
+                "| ${searchdict2}= | [http://robotframework.org/robotframework/latest/libraries/Collections.html#Create%20Dictionary|Create Dictionary] | UD_DUM_ENT_ENTNAME=Read |\n" +
+                "| ${multiplesearchcriteria}= | [http://robotframework.org/robotframework/latest/libraries/BuiltIn.html#Create%20List|Create List] | ${searchdict} | ${searchdict2} |\n" +
+                "| Oim Account Should Have Child Form Entries | ${accountid} | UD_DUM_ENT |  ${multiplesearchcriteria} |\n" +
+                "See `Get Oim Account` how to obtain an ${accountid}.")
+    @ArgumentNames({"accountid","childform","multiplesearchcriteria"})
+    public void oimAccountShouldHaveChildFormEntries(String accountid, String childform, List<Map<String, String>> multiplesearchcriteria) throws AccountNotFoundException, oracle.iam.platform.authopss.exception.AccessDeniedException, GenericProvisioningException {
+        if (oimClient == null) {
+            throw new RuntimeException("There is no connection to OIM");
+        }
+        
+        ProvisioningService provisioningService = oimClient.getService(ProvisioningService.class);
+        
+        Map<String, Object> account = getOimAccountReturnMap(provisioningService.getAccountDetails(Long.valueOf(accountid)));
+        
+        List<Map<String, String>> childFormList = (List<Map<String, String>>)account.get(childform);
+        
+        if(childFormList == null) {
+            throw new RuntimeException("Child form not found: accountid="+accountid+", childform="+childform);
+        }
+        
+        List<Map<String, String>> allChildFormRows = searchChildFormEntries(childFormList, new HashMap<String, String>());
+        
+        List<Map<String, String>> searchcriteriaNotFound = new ArrayList<Map<String, String>>();
+        Set<Map<String, String>> allMatchingRows = new HashSet<Map<String, String>>();
+        for (Map<String, String> singleSearchcriteria : multiplesearchcriteria) {
+            
+            List<Map<String, String>> matchingRows = searchChildFormEntries(childFormList, singleSearchcriteria);
+            
+            if(matchingRows.size() > 1) {
+                throw new RuntimeException("Expected at most 1 child form entry to match, instead found "+matchingRows.size()+": accountid="+accountid+", childform="+childform+", searchcriteria="+singleSearchcriteria);
+            }
+            
+            if(matchingRows.isEmpty()) {
+                searchcriteriaNotFound.add(singleSearchcriteria);
+            } else {
+                allMatchingRows.add(matchingRows.get(0));
+            }
+        }
+        
+        allChildFormRows.removeAll(allMatchingRows);
+        List<Map<String, String>> additionalEntries = allChildFormRows;
+        
+        String errorMessage = "";
+        
+        if(multiplesearchcriteria.size() != allMatchingRows.size()) {
+            errorMessage += "\n\nExpected "+multiplesearchcriteria.size()+" entries to match, but instead matched "+allMatchingRows.size()+": " + allMatchingRows;
+        }
+
+        if(!additionalEntries.isEmpty()) {
+            errorMessage += "\n\nFound "+additionalEntries.size()+" additional non-matched entries: " + additionalEntries;
+        }
+
+        if(!searchcriteriaNotFound.isEmpty()) {
+            errorMessage += "\n\nNo entries were matched for: " + searchcriteriaNotFound;
+        }
+        
+        if(!errorMessage.isEmpty()) {
+            errorMessage =
+                    "Child form entries not exactly matched: accountid="+accountid+", childform="+childform+", multiplesearchcriteria="+multiplesearchcriteria + errorMessage;
+            throw new RuntimeException(errorMessage);
+        }
+    }
+    
+    @RobotKeyword("Fails if specified account does not have specified child form entry.\n\n"+
+                    "Optional _searchcriteria_ can contain multiple entries, to match multi-field child forms.\n\n" +
+                    "Any internal OIM prefix consisting of one ore more digits followed by a tilde (~) is discarded during value comparisons.\n\n" +
+                    "Example:\n" +
+                    "| ${searchdict}= | [http://robotframework.org/robotframework/latest/libraries/Collections.html#Create%20Dictionary|Create Dictionary] | UD_DUM_ENT_ENTNAME=Write |\n" +
+                    "| Oim Account Should Have Child Form Entry | ${accountid} | UD_DUM_ENT | ${searchdict} |\n" +
+                    "See `Get Oim Account` how to obtain an ${accountid}.\n\n" +
+                    "To check a complete child form, see `Oim Account Should Have Child Form Entries`")
+    @ArgumentNames({"accountid","childform","searchcriteria="})
+    public void oimAccountShouldHaveChildFormEntry(String accountid, String childform, Map<String, String> searchcriteria) throws AccountNotFoundException, oracle.iam.platform.authopss.exception.AccessDeniedException, GenericProvisioningException {
+        
+        List<Map<String, String>> allMatchingRows = searchChildForm(accountid, childform, searchcriteria);
+        
+        if(allMatchingRows.size() != 1 && !searchcriteria.isEmpty()) {
+            throw new RuntimeException("Expected 1 child form entry to match, instead found "+allMatchingRows.size()+": accountid="+accountid+", childform="+childform+", searchcriteria="+searchcriteria);
+        }
+    }
+    
+    @RobotKeywordOverload
+    public void oimAccountShouldHaveChildFormEntry(String accountid, String childform) throws AccountNotFoundException, oracle.iam.platform.authopss.exception.AccessDeniedException, GenericProvisioningException {
+        oimAccountShouldHaveChildFormEntry(accountid, childform, new HashMap<String, String>());
+    }
+    
+    @RobotKeyword("Fails if specified account has specified child form entry. See `Oim Account Should Have Child Form Entry` for more information on usage.")
+    @ArgumentNames({"accountid","childform","searchcriteria="})
+    public void oimAccountShouldNotHaveChildFormEntry(String accountid, String childform, Map<String, String> searchcriteria) throws AccountNotFoundException, oracle.iam.platform.authopss.exception.AccessDeniedException, GenericProvisioningException {
+        
+        List<Map<String, String>> allMatchingRows = searchChildForm(accountid, childform, searchcriteria);
+        
+        if(allMatchingRows.size() > 0) {
+            throw new RuntimeException("Expected 0 child form entries to match, instead found "+allMatchingRows.size()+": accountid="+accountid+", childform="+childform+", searchcriteria="+searchcriteria);
+        }
+    }
+    
+    @RobotKeywordOverload
+    public void oimAccountShouldNotHaveChildFormEntry(String accountid, String childform) throws AccountNotFoundException, oracle.iam.platform.authopss.exception.AccessDeniedException, GenericProvisioningException {
+        oimAccountShouldNotHaveChildFormEntry(accountid, childform, new HashMap<String, String>());
+    }
+    
     @RobotKeyword(  "Deletes specified role in OIM. See `Get Oim Role` how to obtain a ${rolekey}.")
     @ArgumentNames({"rolekey"})
     public void deleteOimRole(String rolekey) throws ValidationFailedException, AccessDeniedException, RoleDeleteException, NoSuchRoleException {
@@ -301,7 +415,7 @@ public class OimClientLibrary extends AnnotationLibrary {
                 cal = Calendar.getInstance();
                 cal.add(Calendar.SECOND, 10);
                 Date end = cal.getTime();
-                waitForOimOrchestrationsToComplete(usrkey, "User", null, this.timestampDateFormat.format(start), this.timestampDateFormat.format(end));
+                waitForOimOrchestrationsToComplete(usrkey, "User", null, OimClientLibrary.timestampDateFormat.format(start), OimClientLibrary.timestampDateFormat.format(end));
             }
             
             cal = Calendar.getInstance();
@@ -321,7 +435,7 @@ public class OimClientLibrary extends AnnotationLibrary {
             cal = Calendar.getInstance();
             cal.add(Calendar.SECOND, 10);
             Date end = cal.getTime();
-            waitForOimOrchestrationsToComplete(usrkey, "User", null, this.timestampDateFormat.format(start), this.timestampDateFormat.format(end));
+            waitForOimOrchestrationsToComplete(usrkey, "User", null, OimClientLibrary.timestampDateFormat.format(start), OimClientLibrary.timestampDateFormat.format(end));
             
             // UserManager API delete operation will only execute a delayed delete
             // if context parameter "operationinitiator" is set to "scheduler".
@@ -336,7 +450,7 @@ public class OimClientLibrary extends AnnotationLibrary {
         cal = Calendar.getInstance();
         cal.add(Calendar.SECOND, 10);
         Date end = cal.getTime();
-        waitForOimOrchestrationsToComplete(usrkey, "User", null, this.timestampDateFormat.format(start), this.timestampDateFormat.format(end));
+        waitForOimOrchestrationsToComplete(usrkey, "User", null, OimClientLibrary.timestampDateFormat.format(start), OimClientLibrary.timestampDateFormat.format(end));
         
         if (force) {
             ContextManager.popContext();
@@ -350,7 +464,7 @@ public class OimClientLibrary extends AnnotationLibrary {
     
     @RobotKeyword("Returns true if specified role is present in OIM, false otherwise. See `Get Oim Role` for more information on usage.")
     @ArgumentNames({"rolesearchattributes"})
-    public boolean doesOimRoleExist(HashMap<String, String> rolesearchattributes) throws AccessDeniedException, RoleSearchException, NoSuchAttributeException, ConfigManagerException, ParseException {
+    public boolean doesOimRoleExist(Map<String, String> rolesearchattributes) throws AccessDeniedException, RoleSearchException, NoSuchAttributeException, ConfigManagerException, ParseException {
        
         List<Role> roles = searchRoles(rolesearchattributes);
        
@@ -365,7 +479,7 @@ public class OimClientLibrary extends AnnotationLibrary {
     
     @RobotKeyword("Returns true if specified user is present in OIM, false otherwise. See `Get Oim User` for more information on usage.")
     @ArgumentNames({"usersearchattributes"})
-    public boolean doesOimUserExist(HashMap<String, String> usersearchattributes) throws AccessDeniedException, UserSearchException, NoSuchAttributeException, ConfigManagerException, ParseException {
+    public boolean doesOimUserExist(Map<String, String> usersearchattributes) throws AccessDeniedException, UserSearchException, NoSuchAttributeException, ConfigManagerException, ParseException {
        
         List<User> users = searchUsers(usersearchattributes);
        
@@ -394,7 +508,7 @@ public class OimClientLibrary extends AnnotationLibrary {
         "| Wait For Oim Orchestrations To Complete | createdbefore=${now} | | | # Wait for all orchestration created until now to finish |\n" +
         "| Wait For Oim Orchestrations To Complete | createdafter=${one minute ago} | createdbefore=${now} | | # Wait for all orchestration created in the last minute to finish |\n" +
         "| Wait For Oim Orchestrations To Complete | entityid=${usrkey} | entitytype=User | createdafter=${one minute ago} | # Wait for all orchestration created in the last minute regarding user with key ${usrkey} to finish |\n" +
-        "See `Get Oim User` how to obtain _usrkey_.")
+        "See `Get Oim User` how to obtain a ${usrkey}.")
     @ArgumentNames({"entityid=", "entitytype=", "operation=", "createdafter=", "createdbefore="})
     public void waitForOimOrchestrationsToComplete(String entityId, String entityType, String operation, String createdAfter, String createdBefore) throws tcDataSetException, InterruptedException {
         if (oimClient == null) {
@@ -551,10 +665,11 @@ public class OimClientLibrary extends AnnotationLibrary {
         }
     }
     
-    @RobotKeyword("Returns an all strings dictionary containing the accountid, accountstatus and parent form data of the specified account in OIM.\n\n" +
+    @RobotKeyword("Returns a dictionary containing the accountid, accountstatus, parent form data and child form data of the specified account in OIM.\n\n" +
         "Optional argument _parentformsearchdata_ is a dictionary that specifies name/value pairs of parent form data.\n\n" +
         "For possible _accountstatus_ values, see [http://docs.oracle.com/cd/E40329_01/apirefs.1112/e28159/oracle/iam/provisioning/api/ProvisioningConstants.ObjectStatus.html|ProvisioningConstants.ObjectStatus].\n\n" +
         "Any date typed attributes must be specified and are also returned as _yyyy-MM-dd HH:mm:ss.SSS_, ready to use with [http://robotframework.org/robotframework/latest/libraries/DateTime.html|DateTime].\n\n" +
+        "Any internal OIM prefix consisting of one ore more digits followed by a tilde (~) is discarded during value comparisons and is removed from the returned dictionary.\n\n" +
         "Example:\n" +
         "| ${searchdict}= | [http://robotframework.org/robotframework/latest/libraries/Collections.html#Create%20Dictionary|Create Dictionary] | UD_DUM_USR_USERNAME | DUMMY |\n" +
         "| ${account}= | Get Oim Account | ${usrkey} | DummyApp | accountstatus=Provisioned | parentformsearchdata=${searchdict} |\n" +
@@ -563,7 +678,7 @@ public class OimClientLibrary extends AnnotationLibrary {
         "| Should Be Equal | ${accountstatus} | Provisioned |\n"+
         "See `Get Oim User` how to obtain a ${usrkey}.")
     @ArgumentNames({"usrkey", "appinstname", "accountstatus=", "parentformsearchdata="})
-    public HashMap<String, String> getOimAccount(String usrkey, String appinstname, String accountstatus, HashMap<String, String> parentformsearchdata) throws UserNotFoundException,
+    public Map<String, Object> getOimAccount(String usrkey, String appinstname, String accountstatus, Map<String, String> parentformsearchdata) throws UserNotFoundException,
                                                                                         GenericProvisioningException, ApplicationInstanceNotFoundException, GenericAppInstanceServiceException {
         
         List<Account> accounts = searchAccounts(usrkey, appinstname, accountstatus, parentformsearchdata, true);
@@ -578,33 +693,43 @@ public class OimClientLibrary extends AnnotationLibrary {
     }
     
     @RobotKeywordOverload
-    public HashMap<String, String> getOimAccount(String usrkey, String appinstname, String accountstatus) throws UserNotFoundException, GenericProvisioningException,
+    public Map<String, Object> getOimAccount(String usrkey, String appinstname, String accountstatus) throws UserNotFoundException, GenericProvisioningException,
                                                                                                 ApplicationInstanceNotFoundException, GenericAppInstanceServiceException {
         return getOimAccount(usrkey, appinstname, accountstatus, null);
     }
     
     @RobotKeywordOverload
-    public HashMap<String, String> getOimAccount(String usrkey, String appinstname) throws UserNotFoundException, GenericProvisioningException,
+    public Map<String, Object> getOimAccount(String usrkey, String appinstname) throws UserNotFoundException, GenericProvisioningException,
                                                                                 ApplicationInstanceNotFoundException, GenericAppInstanceServiceException {
         return getOimAccount(usrkey, appinstname, null, null);
     }
     
-    private HashMap<String, String> getOimAccountReturnMap(Account account) {
-        HashMap<String, String> returnMap = new HashMap<String, String>();
+    private Map<String, Object> getOimAccountReturnMap(Account account) {
+        Map<String, Object> returnMap = new HashMap<String, Object>();
         returnMap.put("accountid", account.getAccountID());
         returnMap.put("accountstatus", account.getAccountStatus());
         if(account.getAccountData() != null) {
             for (Map.Entry<String, Object> entry : account.getAccountData().getData().entrySet()) {
-                if(entry.getValue() instanceof Date) {
-                    Date value = (Date) entry.getValue();
-                    returnMap.put(entry.getKey(), timestampDateFormat.format(value));
-                } else if (entry.getValue() instanceof Timestamp) {
-                    Timestamp value = (Timestamp) entry.getValue();
-                    returnMap.put(entry.getKey(), timestampDateFormat.format(new Date(value.getTime())));
-                } else if (entry.getValue() != null){
-                    returnMap.put(entry.getKey(), entry.getValue().toString());
-                } else {
-                    returnMap.put(entry.getKey(), "");
+                
+                String strFormValue = OimClientLibrary.getFormStringValue(entry.getValue());
+                returnMap.put(entry.getKey(), strFormValue);
+            }
+            
+            if(account.getAccountData().getChildData() != null) {
+                for (Map.Entry<String, ArrayList<ChildTableRecord>> entry : account.getAccountData().getChildData().entrySet()) {
+                    
+                    List<Map<String, String>> childTableEntries = new ArrayList<Map<String, String>>();
+                    for (ChildTableRecord childTableRecord : account.getAccountData().getChildData().get(entry.getKey())) {
+                        
+                        Map<String, String> childTableEntry = new HashMap<String, String>();
+                        for (Map.Entry<String, Object> childEntry : childTableRecord.getChildData().entrySet()) {
+                            
+                            String strFormValue = OimClientLibrary.getFormStringValue(childEntry.getValue());
+                            childTableEntry.put(childEntry.getKey(), strFormValue);
+                        }
+                        childTableEntries.add(childTableEntry);
+                    }
+                    returnMap.put(entry.getKey(), childTableEntries);
                 }
             }
         }
@@ -613,7 +738,7 @@ public class OimClientLibrary extends AnnotationLibrary {
     
     @RobotKeyword("Fail if user does not have specified account in OIM. See `Get Oim Account` for more information on usage.")
     @ArgumentNames({"usrkey", "appinstname", "objstatus=", "parentformsearchdata="})
-    public void oimAccountShouldExist(String usrkey, String appinstname, String objstatus, HashMap<String, String> parentformsearchdata) throws UserNotFoundException,
+    public void oimAccountShouldExist(String usrkey, String appinstname, String objstatus, Map<String, String> parentformsearchdata) throws UserNotFoundException,
                                                                                         GenericProvisioningException, ApplicationInstanceNotFoundException, GenericAppInstanceServiceException {
         
         boolean populateAccountData = true;
@@ -643,7 +768,7 @@ public class OimClientLibrary extends AnnotationLibrary {
     
     @RobotKeyword("Fail if user has specified account in OIM. See `Get Oim Account` for more information on usage.")
     @ArgumentNames({"usrkey", "appinstname", "objstatus=", "parentformsearchdata="})
-    public void oimAccountShouldNotExist(String usrkey, String appinstname, String objstatus, HashMap<String, String> parentformsearchdata) throws UserNotFoundException,
+    public void oimAccountShouldNotExist(String usrkey, String appinstname, String objstatus, Map<String, String> parentformsearchdata) throws UserNotFoundException,
                                                                                         GenericProvisioningException, ApplicationInstanceNotFoundException, GenericAppInstanceServiceException {
         boolean populateAccountData = true;
         if(parentformsearchdata == null || parentformsearchdata.isEmpty()) {
@@ -681,7 +806,7 @@ public class OimClientLibrary extends AnnotationLibrary {
                     "| [http://robotframework.org/robotframework/latest/libraries/BuiltIn.html#Log%20To%20Console|Log To Console] | ${role} |\n" + 
                     "| ${rolekey}= | [http://robotframework.org/robotframework/latest/libraries/Collections.html#Get%20From%20Dictionary|Get From Dictionary] | ${role} | Role Key |")
     @ArgumentNames({"rolesearchattributes"})
-    public HashMap<String, String> getOimRole(HashMap<String, String> rolesearchattributes) throws AccessDeniedException, RoleSearchException, ConfigManagerException, NoSuchAttributeException, ParseException  {
+    public Map<String, String> getOimRole(Map<String, String> rolesearchattributes) throws AccessDeniedException, RoleSearchException, ConfigManagerException, NoSuchAttributeException, ParseException  {
         
         List<Role> roles = searchRoles(rolesearchattributes);
        
@@ -692,16 +817,11 @@ public class OimClientLibrary extends AnnotationLibrary {
         } else {
             Role role = roles.get(0);
             
-            HashMap<String, String> returnMap = new HashMap<String, String>();
+            Map<String, String> returnMap = new HashMap<String, String>();
             for (Map.Entry<String, Object> entry : role.getAttributes().entrySet()) {
-                if(entry.getValue() instanceof Date) {
-                    Date value = (Date) entry.getValue();
-                    returnMap.put(entry.getKey(), timestampDateFormat.format(value));
-                } else if (entry.getValue() != null){
-                    returnMap.put(entry.getKey(), entry.getValue().toString());
-                } else {
-                    returnMap.put(entry.getKey(), "");
-                }
+                
+                String strFormValue = OimClientLibrary.getFormStringValue(entry.getValue());
+                returnMap.put(entry.getKey(), strFormValue);
             }
             
             return returnMap;
@@ -718,7 +838,7 @@ public class OimClientLibrary extends AnnotationLibrary {
                     "| [http://robotframework.org/robotframework/latest/libraries/BuiltIn.html#Log%20To%20Console|Log To Console] | ${user} |\n" + 
                     "| ${usrkey}= | [http://robotframework.org/robotframework/latest/libraries/Collections.html#Get%20From%20Dictionary|Get From Dictionary] | ${user} | usr_key |")
     @ArgumentNames({"usersearchattributes"})
-    public HashMap<String, String> getOimUser(HashMap<String, String> usersearchattributes) throws AccessDeniedException, UserSearchException, NoSuchAttributeException, ConfigManagerException, ParseException {
+    public Map<String, String> getOimUser(Map<String, String> usersearchattributes) throws AccessDeniedException, UserSearchException, NoSuchAttributeException, ConfigManagerException, ParseException {
         
         List<User> users = searchUsers(usersearchattributes);
        
@@ -729,16 +849,11 @@ public class OimClientLibrary extends AnnotationLibrary {
         } else {
             User user = users.get(0);
             
-            HashMap<String, String> returnMap = new HashMap<String, String>();
+            Map<String, String> returnMap = new HashMap<String, String>();
             for (Map.Entry<String, Object> entry : user.getAttributes().entrySet()) {
-                if(entry.getValue() instanceof Date) {
-                    Date value = (Date) entry.getValue();
-                    returnMap.put(entry.getKey(), timestampDateFormat.format(value));
-                } else if (entry.getValue() != null){
-                    returnMap.put(entry.getKey(), entry.getValue().toString());
-                } else {
-                    returnMap.put(entry.getKey(), "");
-                }
+                
+                String strFormValue = OimClientLibrary.getFormStringValue(entry.getValue());
+                returnMap.put(entry.getKey(), strFormValue);
             }
             
             return returnMap;
@@ -749,7 +864,7 @@ public class OimClientLibrary extends AnnotationLibrary {
                     "Any date typed attributes must be specified and are also returned as _yyyy-MM-dd HH:mm:ss.SSS_, ready to use with [http://robotframework.org/robotframework/latest/libraries/DateTime.html|DateTime].\n\n" +
                     "See `Get Oim Account` how to obtain an ${accountid}.")
     @ArgumentNames({"accountid","modifyparentformdata"})
-    public HashMap<String, String> modifyOimAccount(String accountid, HashMap<String, String> modifyparentformdata) throws AccountNotFoundException, oracle.iam.platform.authopss.exception.AccessDeniedException, GenericProvisioningException, ParseException   {
+    public Map<String, Object> modifyOimAccount(String accountid, Map<String, String> modifyparentformdata) throws AccountNotFoundException, oracle.iam.platform.authopss.exception.AccessDeniedException, GenericProvisioningException, ParseException   {
         
         ProvisioningService provisioningService = oimClient.getService(ProvisioningService.class);
         
@@ -798,7 +913,7 @@ public class OimClientLibrary extends AnnotationLibrary {
                     "| ${role}=  | Modify Oim Role | ${rolekey} | ${moddict} |\n" +
                     "See `Get Oim Role` how to obtain a ${rolekey}.")
     @ArgumentNames({"rolekey","modifyattributes"})
-    public HashMap<String, String> modifyOimRole(String rolekey, HashMap<String, String> modifyattributes) throws NoSuchAttributeException, ConfigManagerException, ParseException, ValidationFailedException, AccessDeniedException, RoleModifyException, NoSuchRoleException, RoleSearchException {
+    public Map<String, String> modifyOimRole(String rolekey, Map<String, String> modifyattributes) throws NoSuchAttributeException, ConfigManagerException, ParseException, ValidationFailedException, AccessDeniedException, RoleModifyException, NoSuchRoleException, RoleSearchException {
         
         Role roleModify = new Role(rolekey);
         
@@ -826,7 +941,7 @@ public class OimClientLibrary extends AnnotationLibrary {
         
         roleManager.modify(roleModify);
         
-        HashMap<String, String> rolesearchattributes = new HashMap<String, String>();
+        Map<String, String> rolesearchattributes = new HashMap<String, String>();
         rolesearchattributes.put(RoleManagerConstants.RoleAttributeName.KEY.getId(), rolekey);
         return getOimRole(rolesearchattributes);
     }
@@ -842,7 +957,7 @@ public class OimClientLibrary extends AnnotationLibrary {
                     "| Should Be Equal | ${startdate} | ${newstartdate} |\n"+
                     "See `Get Oim User` how to obtain a ${usrkey}.")
     @ArgumentNames({"usrkey","modifyattributes"})
-    public HashMap<String, String> modifyOimUser(String usrkey, HashMap<String, String> modifyattributes) throws AccessDeniedException, UserSearchException, NoSuchAttributeException, ConfigManagerException, ParseException, ValidationFailedException, UserModifyException, NoSuchUserException {
+    public Map<String, String> modifyOimUser(String usrkey, Map<String, String> modifyattributes) throws AccessDeniedException, UserSearchException, NoSuchAttributeException, ConfigManagerException, ParseException, ValidationFailedException, UserModifyException, NoSuchUserException {
         
         User userModify = new User(usrkey);
         
@@ -870,14 +985,14 @@ public class OimClientLibrary extends AnnotationLibrary {
         
         userManager.modify(userModify);
         
-        HashMap<String, String> usersearchattributes = new HashMap<String, String>();
+        Map<String, String> usersearchattributes = new HashMap<String, String>();
         usersearchattributes.put(UserManagerConstants.AttributeName.USER_KEY.getId(), usrkey);
         return getOimUser(usersearchattributes);
     }
     
     @RobotKeyword("Fail if user is not present in OIM. See `Get Oim User` for more information on usage.")
     @ArgumentNames({"usersearchattributes"})
-    public void oimUserShouldExist(HashMap<String, String> usersearchattributes) throws AccessDeniedException, UserSearchException, NoSuchAttributeException, ConfigManagerException, ParseException {
+    public void oimUserShouldExist(Map<String, String> usersearchattributes) throws AccessDeniedException, UserSearchException, NoSuchAttributeException, ConfigManagerException, ParseException {
        
         List<User> users = searchUsers(usersearchattributes);
        
@@ -888,7 +1003,7 @@ public class OimClientLibrary extends AnnotationLibrary {
     
     @RobotKeyword("Fail if user is present in OIM. See `Get Oim User` for more information on usage.")
     @ArgumentNames({"usersearchattributes"})
-    public void oimUserShouldNotExist(HashMap<String, String> usersearchattributes) throws AccessDeniedException, UserSearchException, NoSuchAttributeException, ConfigManagerException, ParseException {
+    public void oimUserShouldNotExist(Map<String, String> usersearchattributes) throws AccessDeniedException, UserSearchException, NoSuchAttributeException, ConfigManagerException, ParseException {
        
         List<User> users = searchUsers(usersearchattributes);
        
@@ -899,7 +1014,7 @@ public class OimClientLibrary extends AnnotationLibrary {
    
     @RobotKeyword("Fail if role is not present in OIM. See `Get Oim Role` for more information on usage.")
     @ArgumentNames({"rolesearchattributes"})
-    public void oimRoleShouldExist(HashMap<String, String> rolesearchattributes) throws AccessDeniedException, RoleSearchException, NoSuchAttributeException, ConfigManagerException, ParseException {
+    public void oimRoleShouldExist(Map<String, String> rolesearchattributes) throws AccessDeniedException, RoleSearchException, NoSuchAttributeException, ConfigManagerException, ParseException {
        
         List<Role> roles = searchRoles(rolesearchattributes);
        
@@ -910,7 +1025,7 @@ public class OimClientLibrary extends AnnotationLibrary {
    
     @RobotKeyword("Fail if role is present in OIM. See `Get Oim Role` for more information on usage.")
     @ArgumentNames({"rolesearchattributes"})
-    public void oimRoleShouldNotExist(HashMap<String, String> rolesearchattributes) throws AccessDeniedException, RoleSearchException, NoSuchAttributeException, ConfigManagerException, ParseException {
+    public void oimRoleShouldNotExist(Map<String, String> rolesearchattributes) throws AccessDeniedException, RoleSearchException, NoSuchAttributeException, ConfigManagerException, ParseException {
        
         List<Role> roles = searchRoles(rolesearchattributes);
        
@@ -967,7 +1082,7 @@ public class OimClientLibrary extends AnnotationLibrary {
         JobDetails jd = schedulerService.getJobDetail(jobname);
         ScheduledTask taskName = schedulerService.lookupScheduledTask(jd.getTaskName());
        
-        HashMap<String, JobParameter> taskParamMap = taskName.getParameters();
+        Map<String, JobParameter> taskParamMap = taskName.getParameters();
         JobParameter jp = taskParamMap.get(paramname);
        
         if(jp == null) {
@@ -1087,7 +1202,7 @@ public class OimClientLibrary extends AnnotationLibrary {
                 "| ${encode}= | Get From Dictionary | ${lookupvalue} | encode |\n" +
                 "| ${decode}= | Get From Dictionary | ${lookupvalue} | decode |")
     @ArgumentNames({"lookupcode","encode=","decode="})
-    public HashMap<String, String> getOimLookupValue(String lookupcode, String encode, String decode) throws tcAPIException, tcInvalidLookupException, tcColumnNotFoundException {
+    public Map<String, String> getOimLookupValue(String lookupcode, String encode, String decode) throws tcAPIException, tcInvalidLookupException, tcColumnNotFoundException {
         if (oimClient == null) {
             throw new RuntimeException("There is no connection to OIM");
         }
@@ -1115,7 +1230,7 @@ public class OimClientLibrary extends AnnotationLibrary {
             throw new RuntimeException("Multiple entries in OIM lookup '"+lookupcode+"' match "+filter);
         } else {
             resultSet.goToRow(0);
-            HashMap<String, String> returnMap = new HashMap<String, String>(2);
+            Map<String, String> returnMap = new HashMap<String, String>(2);
             returnMap.put("encode", resultSet.getStringValue(LOOKUP_ENCODE_NAME));
             returnMap.put("decode", resultSet.getStringValue(LOOKUP_DECODE_NAME));
             return returnMap;
@@ -1123,7 +1238,7 @@ public class OimClientLibrary extends AnnotationLibrary {
     }
     
     @RobotKeywordOverload
-    public HashMap<String, String> getOimLookupValue(String lookupcode, String encode) throws tcAPIException, tcInvalidLookupException, tcColumnNotFoundException {
+    public Map<String, String> getOimLookupValue(String lookupcode, String encode) throws tcAPIException, tcInvalidLookupException, tcColumnNotFoundException {
         return getOimLookupValue(lookupcode, encode, null);
     }
    
@@ -1263,7 +1378,7 @@ public class OimClientLibrary extends AnnotationLibrary {
         return null;
     }
     
-    private List<Account> searchAccounts(String usrkey, String appinstname, String accountstatus, HashMap<String, String> parentformsearchdata, boolean populateAccountData) throws UserNotFoundException,
+    private List<Account> searchAccounts(String usrkey, String appinstname, String accountstatus, Map<String, String> parentformsearchdata, boolean populateAccountData) throws UserNotFoundException,
                                                                                         GenericProvisioningException, ApplicationInstanceNotFoundException, GenericAppInstanceServiceException {
         if (oimClient == null) {
             throw new RuntimeException("There is no connection to OIM");
@@ -1307,18 +1422,7 @@ public class OimClientLibrary extends AnnotationLibrary {
                     
                     Object formValue = parentFormData.get(searchKey);
                     
-                    String strFormValue;
-                    
-                    if(formValue == null) {
-                        strFormValue = "";
-                    } else if (formValue instanceof Date) {
-                        strFormValue = timestampDateFormat.format(formValue);
-                    } else if (formValue instanceof Timestamp) {
-                        Timestamp t = (Timestamp) formValue;
-                        strFormValue = timestampDateFormat.format(new Date(t.getTime()));
-                    } else {
-                        strFormValue = formValue.toString();
-                    }
+                    String strFormValue = OimClientLibrary.getFormStringValue(formValue);
                     
                     if (!strFormValue.equals(searchValue)) {
                         System.out.println("*TRACE* Excluding account "+account.getAccountID()+" because '"+strFormValue+"' not equal to '"+searchValue+"'");
@@ -1332,7 +1436,84 @@ public class OimClientLibrary extends AnnotationLibrary {
         return accounts;
     }
     
-    private List<User> searchUsers (HashMap<String, String> usersearchattributes) throws AccessDeniedException, UserSearchException, NoSuchAttributeException, ConfigManagerException, ParseException {
+    // Returns all rows in specified childform that match specified searchcriteria
+    private List<Map<String, String>> searchChildForm(String accountid, String childform, Map<String, String> searchcriteria) throws AccountNotFoundException, oracle.iam.platform.authopss.exception.AccessDeniedException, GenericProvisioningException {
+        if (oimClient == null) {
+            throw new RuntimeException("There is no connection to OIM");
+        }
+        
+        ProvisioningService provisioningService = oimClient.getService(ProvisioningService.class);
+        
+        Map<String, Object> account = getOimAccountReturnMap(provisioningService.getAccountDetails(Long.valueOf(accountid)));
+        
+        return searchChildForm(account, childform, searchcriteria);
+    }
+    
+    // Returns all rows in specified childform that match specified searchcriteria
+    private List<Map<String, String>> searchChildForm(Map<String, Object> account, String childform, Map<String, String> searchcriteria) {
+        
+        List<Map<String, String>> childFormList = (List<Map<String, String>>)account.get(childform);
+        
+        if(childFormList == null) {
+            throw new RuntimeException("Child form not found: accountid="+account.get("accountid")+", childform="+childform);
+        }
+        
+        return searchChildFormEntries(childFormList, searchcriteria);
+    }
+    
+    // Returns all rows in specified childform that match specified searchcriteria
+    private List<Map<String, String>> searchChildFormEntries(List<Map<String, String>> childFormList, Map<String, String> searchcriteria) {
+        
+        List<Map<String, String>> allMatchingRows = new ArrayList<Map<String, String>>();
+        
+        for (Map<String, String> childFormRow : childFormList) {
+            boolean matchingRow = true;
+            
+            for (Map.Entry<String, String> selectionEntry : searchcriteria.entrySet()) {
+                String searchKey = selectionEntry.getKey();
+                String searchValue = selectionEntry.getValue();
+                
+                Object formValue = childFormRow.get(searchKey);
+
+                String strFormValue = OimClientLibrary.getFormStringValue(formValue);
+                
+                if (!strFormValue.equals(searchValue)) {
+                    matchingRow = false;
+                    break;
+                }
+            }
+            
+            if(matchingRow) {
+                allMatchingRows.add(childFormRow);
+            }
+        }
+        return allMatchingRows;
+    }
+    
+    private static String getFormStringValue(Object formValue) {
+        String strFormValue;
+        
+        if(formValue == null) {
+            strFormValue = "";
+        } else if (formValue instanceof Date) {
+            strFormValue = timestampDateFormat.format(formValue);
+        } else if (formValue instanceof Timestamp) {
+            Timestamp t = (Timestamp) formValue;
+            strFormValue = timestampDateFormat.format(new Date(t.getTime()));
+        } else {
+            strFormValue = formValue.toString();
+        }
+
+        Matcher m = itResourcePrefixPattern.matcher(strFormValue);
+        if(m.find()) {
+            System.out.println("*TRACE* Stripping OIM IT Resource prefix "+m.group()+" for value "+strFormValue);
+            strFormValue = strFormValue.substring(m.end());
+        }
+        
+        return strFormValue;
+    }
+    
+    private List<User> searchUsers (Map<String, String> usersearchattributes) throws AccessDeniedException, UserSearchException, NoSuchAttributeException, ConfigManagerException, ParseException {
         if (oimClient == null) {
             throw new RuntimeException("There is no connection to OIM");
         }
@@ -1368,7 +1549,7 @@ public class OimClientLibrary extends AnnotationLibrary {
         return users;
     }
     
-    private List<Role> searchRoles (HashMap<String, String> rolesearchattributes) throws AccessDeniedException, RoleSearchException, NoSuchAttributeException, ConfigManagerException, ParseException {
+    private List<Role> searchRoles (Map<String, String> rolesearchattributes) throws AccessDeniedException, RoleSearchException, NoSuchAttributeException, ConfigManagerException, ParseException {
         if (oimClient == null) {
             throw new RuntimeException("There is no connection to OIM");
         }
@@ -1408,7 +1589,7 @@ public class OimClientLibrary extends AnnotationLibrary {
         }
         tcAccessPolicyOperationsIntf polIntf = oimClient.getService(tcAccessPolicyOperationsIntf.class);
        
-        Map<String,String> hm = new HashMap<String,String>();
+        Map<String,String> hm = new HashMap<String,String>(1);
         hm.put("Access Policies.Name", policyname);
        
         System.out.println("*INFO* Searching for access policy having name '"+policyname+"'");
