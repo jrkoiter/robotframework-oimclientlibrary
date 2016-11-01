@@ -17,66 +17,32 @@
 package nl.fuselogic.robotframework.libraries.oim;
 
 
-import Thor.API.Exceptions.tcAPIException;
-import Thor.API.Exceptions.tcColumnNotFoundException;
-import Thor.API.Exceptions.tcInvalidAttributeException;
-import Thor.API.Exceptions.tcInvalidLookupException;
-import Thor.API.Exceptions.tcInvalidValueException;
+import Thor.API.Exceptions.*;
 import Thor.API.Operations.tcAccessPolicyOperationsIntf;
 import Thor.API.Operations.tcLookupOperationsIntf;
+import Thor.API.Operations.tcProvisioningOperationsIntf;
 import Thor.API.Security.XLClientSecurityAssociation;
 import Thor.API.tcResultSet;
+import com.thortech.xl.dataaccess.tcClientDataAccessException;
 import com.thortech.xl.dataaccess.tcDataBaseClient;
 import com.thortech.xl.dataaccess.tcDataProvider;
 import com.thortech.xl.dataaccess.tcDataSetException;
 import com.thortech.xl.dataobj.tcDataSet;
-
-import java.io.InputStream;
-
-import java.sql.Timestamp;
-import java.text.ParseException;
-
-import java.text.SimpleDateFormat;
-import java.util.ArrayList;
-import java.util.Calendar;
-
-import java.util.Date;
-import java.util.HashMap;
-import java.util.HashSet;
-import java.util.Hashtable;
-import java.util.Iterator;
-import java.util.List;
-import java.util.Map;
-import java.util.Scanner;
-import java.util.Set;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
-
-import javax.security.auth.login.LoginException;
+import com.thortech.xl.orb.dataaccess.tcDataAccessException;
 import oracle.iam.accesspolicy.api.AccessPolicyServiceInternal;
 import oracle.iam.accesspolicy.exception.AccessPolicyEvaluationException;
 import oracle.iam.accesspolicy.exception.AccessPolicyEvaluationUnauthorizedException;
 import oracle.iam.accesspolicy.exception.AccessPolicyServiceException;
 import oracle.iam.accesspolicy.exception.UserNotActiveException;
+import oracle.iam.conf.api.SystemConfigurationService;
+import oracle.iam.conf.exception.SystemConfigurationServiceException;
+import oracle.iam.conf.vo.SystemProperty;
 import oracle.iam.configservice.api.ConfigManager;
 import oracle.iam.configservice.api.Constants;
 import oracle.iam.configservice.exception.ConfigManagerException;
 import oracle.iam.configservice.exception.NoSuchAttributeException;
 import oracle.iam.configservice.vo.AttributeDefinition;
-import oracle.iam.identity.exception.NoSuchRoleException;
-import oracle.iam.identity.exception.NoSuchUserException;
-import oracle.iam.identity.exception.RoleDeleteException;
-import oracle.iam.identity.exception.RoleModifyException;
-
-import oracle.iam.identity.exception.RoleSearchException;
-import oracle.iam.identity.exception.SearchKeyNotUniqueException;
-import oracle.iam.identity.exception.UserDeleteException;
-import oracle.iam.identity.exception.UserDisableException;
-import oracle.iam.identity.exception.UserLookupException;
-import oracle.iam.identity.exception.UserManagerException;
-import oracle.iam.identity.exception.UserModifyException;
-import oracle.iam.identity.exception.UserSearchException;
-import oracle.iam.identity.exception.ValidationFailedException;
+import oracle.iam.identity.exception.*;
 import oracle.iam.identity.rolemgmt.api.RoleManager;
 import oracle.iam.identity.rolemgmt.api.RoleManagerConstants;
 import oracle.iam.identity.rolemgmt.vo.Role;
@@ -91,44 +57,48 @@ import oracle.iam.platform.entitymgr.vo.SearchCriteria;
 import oracle.iam.provisioning.api.ApplicationInstanceService;
 import oracle.iam.provisioning.api.ProvisioningConstants;
 import oracle.iam.provisioning.api.ProvisioningService;
-import oracle.iam.provisioning.exception.AccountNotFoundException;
-import oracle.iam.provisioning.exception.ApplicationInstanceNotFoundException;
-import oracle.iam.provisioning.exception.GenericAppInstanceServiceException;
-import oracle.iam.provisioning.exception.GenericProvisioningException;
-import oracle.iam.provisioning.exception.UserNotFoundException;
+import oracle.iam.provisioning.exception.*;
 import oracle.iam.provisioning.vo.Account;
 import oracle.iam.provisioning.vo.ApplicationInstance;
 import oracle.iam.provisioning.vo.ChildTableRecord;
 import oracle.iam.provisioning.vo.EntitlementInstance;
 import oracle.iam.scheduler.api.SchedulerService;
-import oracle.iam.scheduler.exception.IncorrectScheduleTaskDefinationException;
-import oracle.iam.scheduler.exception.LastModifyDateNotSetException;
-import oracle.iam.scheduler.exception.NoJobHistoryFoundException;
-import oracle.iam.scheduler.exception.ParameterValueTypeNotSupportedException;
-import oracle.iam.scheduler.exception.RequiredParameterNotSetException;
-import oracle.iam.scheduler.exception.SchedulerAccessDeniedException;
-import oracle.iam.scheduler.exception.SchedulerException;
+import oracle.iam.scheduler.exception.*;
 import oracle.iam.scheduler.vo.JobDetails;
 import oracle.iam.scheduler.vo.JobHistory;
 import oracle.iam.scheduler.vo.JobParameter;
 import oracle.iam.scheduler.vo.ScheduledTask;
 import oracle.iam.selfservice.self.selfmgmt.api.AuthenticatedSelfService;
-
 import org.robotframework.javalib.annotation.ArgumentNames;
 import org.robotframework.javalib.annotation.RobotKeyword;
 import org.robotframework.javalib.annotation.RobotKeywordOverload;
 import org.robotframework.javalib.annotation.RobotKeywords;
 import org.robotframework.javalib.library.AnnotationLibrary;
 
+import javax.security.auth.login.LoginException;
+import java.io.InputStream;
+import java.sql.Timestamp;
+import java.text.ParseException;
+import java.text.SimpleDateFormat;
+import java.util.*;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+
 
 @RobotKeywords
 public class OimClientLibrary extends AnnotationLibrary {
-   
+
+    @SuppressWarnings("unused")
     public static final String ROBOT_LIBRARY_VERSION = "0.3";
-   
-    private static enum JobStatus { SHUTDOWN, STARTED, STOPPED, NONE, PAUSED, RUNNING, FAILED, INTERRUPT }
-    
-    private static enum ProcessStatus { WAITING,  ABANDONED,  COMPLETED,  MANUAL_COMPLETED,  ACTIVE,  FAILED,  CANCELLED,  PENDING_CANCELLED,  PENDING_CANCELLED_WITH_COMPENSATION,  CANCELLED_WITH_COMPENSATION,  COMPENSATED,  RESTARTED }
+
+    @SuppressWarnings("unused")
+    private enum JobStatus { SHUTDOWN, STARTED, STOPPED, NONE, PAUSED, RUNNING, FAILED, INTERRUPT }
+
+    @SuppressWarnings("unused")
+    private enum ProcessStatus { WAITING,  ABANDONED,  COMPLETED,  MANUAL_COMPLETED,  ACTIVE,  FAILED,  CANCELLED,  PENDING_CANCELLED,  PENDING_CANCELLED_WITH_COMPENSATION,  CANCELLED_WITH_COMPENSATION,  COMPENSATED,  RESTARTED }
    
     private OIMClient oimClient;
     private String oimUrl;
@@ -188,7 +158,7 @@ public class OimClientLibrary extends AnnotationLibrary {
                 try {
                     // Check if connection is still valid by getting user details
                     AuthenticatedSelfService authenticatedSelfService = oimClient.getService(AuthenticatedSelfService.class);
-                    Set<String> retAttrs = new HashSet<String>();
+                    Set<String> retAttrs = new HashSet<>();
                     retAttrs.add(UserManagerConstants.AttributeName.USER_LOGIN.getId());
                     User user = authenticatedSelfService.getProfileDetails(retAttrs);
 
@@ -208,8 +178,8 @@ public class OimClientLibrary extends AnnotationLibrary {
         System.out.println("*INFO* Connecting to "+url+" as "+username);
         
         oimUrl = url;
-        
-        Hashtable env = new Hashtable();
+
+        Hashtable<String, String> env = new Hashtable<>();
         env.put(OIMClient.JAVA_NAMING_FACTORY_INITIAL, OIMClient.WLS_CONTEXT_FACTORY);
         env.put(OIMClient.JAVA_NAMING_PROVIDER_URL, url);
        
@@ -284,7 +254,8 @@ public class OimClientLibrary extends AnnotationLibrary {
         ProvisioningService provisioningService = oimClient.getService(ProvisioningService.class);
         
         Map<String, Object> account = getOimAccountReturnMap(provisioningService.getAccountDetails(Long.valueOf(accountid)));
-        
+
+        @SuppressWarnings("unchecked")
         List<Map<String, String>> childFormList = (List<Map<String, String>>)account.get(childform);
         
         if(childFormList == null) {
@@ -293,8 +264,8 @@ public class OimClientLibrary extends AnnotationLibrary {
         
         List<Map<String, String>> allChildFormRows = searchChildFormEntries(childFormList, new HashMap<String, String>());
         
-        List<Map<String, String>> searchcriteriaNotFound = new ArrayList<Map<String, String>>();
-        Set<Map<String, String>> allMatchingRows = new HashSet<Map<String, String>>();
+        List<Map<String, String>> searchcriteriaNotFound = new ArrayList<>();
+        Set<Map<String, String>> allMatchingRows = new HashSet<>();
         for (Map<String, String> singleSearchcriteria : multiplesearchcriteria) {
             
             List<Map<String, String>> matchingRows = searchChildFormEntries(childFormList, singleSearchcriteria);
@@ -312,7 +283,7 @@ public class OimClientLibrary extends AnnotationLibrary {
         
         allChildFormRows.removeAll(allMatchingRows);
         List<Map<String, String>> additionalEntries = allChildFormRows;
-        
+
         String errorMessage = "";
         
         if(multiplesearchcriteria.size() != allMatchingRows.size()) {
@@ -391,74 +362,113 @@ public class OimClientLibrary extends AnnotationLibrary {
                     "Set _force_ to True if immediate deletion is required, even if OIM system property _XL.UserDeleteDelayPeriod_ is set to a non-zero value. If mentioned system property is set to zero,  _force_  has no effect: the deletion will always be immediate.\n\n"+
                     "See `Get Oim User` how to obtain a ${usrkey}.")
     @ArgumentNames({"usrkey","force="})
-    public void deleteOimUser(String usrkey, boolean force) throws ValidationFailedException, AccessDeniedException, UserModifyException, NoSuchUserException, UserDeleteException, UserDisableException, UserLookupException, tcDataSetException, InterruptedException {
+    public void deleteOimUser(String usrkey, boolean force) throws ValidationFailedException, AccessDeniedException, UserModifyException, NoSuchUserException, UserDeleteException, UserDisableException, UserLookupException, tcDataSetException, InterruptedException, tcAPIException, tcColumnNotFoundException, tcTaskNotFoundException, tcBulkException, SystemConfigurationServiceException, tcDataAccessException, tcClientDataAccessException {
         if (oimClient == null) {
             throw new RuntimeException("There is no connection to OIM");
         }
-        
+
         UserManager userManager = oimClient.getService(UserManager.class);
-        
-        System.out.println("*INFO* Deleting user "+usrkey);
-        
-        Calendar cal;
-        
-        if(force) {
+        tcProvisioningOperationsIntf provisioningOperationsIntf = oimClient.getService(tcProvisioningOperationsIntf.class);
+        SystemConfigurationService systemConfigurationService = oimClient.getService(SystemConfigurationService.class);
+
+        try {
             User user = userManager.getDetails(usrkey, null, false);
-            
-            System.out.println("*INFO* Bypassing any delayed delete configuration in OIM");
-            
-            if(!user.getStatus().equals(UserManagerConstants.AttributeValues.USER_STATUS_DISABLED.getId())) {
-                cal = Calendar.getInstance();
-                cal.add(Calendar.SECOND, -10);
-                Date start = cal.getTime();
-                userManager.disable(usrkey, false);
-                cal = Calendar.getInstance();
-                cal.add(Calendar.SECOND, 10);
-                Date end = cal.getTime();
-                waitForOimOrchestrationsToComplete(usrkey, "User", null, OimClientLibrary.timestampDateFormat.format(start), OimClientLibrary.timestampDateFormat.format(end));
+
+            if(!force && user.getAutomaticallyDeleteDate() != null && user.getStatus().equals(UserManagerConstants.AttributeValues.USER_STATUS_DISABLED.getId())) {
+                System.out.println("*WARN* User " + usrkey + "(" + getUserLogin(usrkey) + ") is already in delayed delete state. Specify force argument as true to force immediate deletion of user.");
+                return;
+            } else if (user.getStatus().equals(UserManagerConstants.AttributeValues.USER_STATUS_DELETED.getId())) {
+                System.out.println("*WARN* User " + usrkey + "(" + getUserLogin(usrkey) + ") is already deleted");
+                return;
             }
-            
-            cal = Calendar.getInstance();
-            cal.set(Calendar.HOUR_OF_DAY, 0);
-            cal.set(Calendar.MINUTE, 0);
-            cal.set(Calendar.SECOND, 0);
-            cal.set(Calendar.MILLISECOND, 0);
-            Date autoDeleteDate = cal.getTime();
-            
-            User userModify = new User(usrkey);
-            userModify.setAttribute(UserManagerConstants.AttributeName.AUTOMATICALLY_DELETED_ON.getId(), autoDeleteDate);
-            
+
+            System.out.println("*INFO* Deleting user " + usrkey + "(" + getUserLogin(usrkey) + ")");
+
+            int delayPeriod = 0;
+            SystemProperty userDeleteDelayPeriod = systemConfigurationService.getSystemProperty("XL.UserDeleteDelayPeriod");
+            if(userDeleteDelayPeriod != null) {
+                delayPeriod = Integer.valueOf(userDeleteDelayPeriod.getPtyValue());
+            }
+
+            Calendar cal;
+
+            if (force && delayPeriod > 0) {
+
+                System.out.println("*INFO* Bypassing OIM configured delayed delete of "+delayPeriod+" days");
+
+                cal = Calendar.getInstance();
+                cal.set(Calendar.HOUR_OF_DAY, 0);
+                cal.set(Calendar.MINUTE, 0);
+                cal.set(Calendar.SECOND, 0);
+                cal.set(Calendar.MILLISECOND, 0);
+                Date today = cal.getTime();
+
+                if (user.getAutomaticallyDeleteDate() == null ||
+                        user.getAutomaticallyDeleteDate().after(today) ||
+                        !user.getStatus().equals(UserManagerConstants.AttributeValues.USER_STATUS_DISABLED.getId())) {
+                    tcDataProvider dbProvider = null;
+                    try {
+                        dbProvider = new tcDataBaseClient();
+                        dbProvider.writeStatement("UPDATE usr SET usr_status = '" +
+                                UserManagerConstants.AttributeValues.USER_STATUS_DISABLED.getId() +
+                                "', usr_disabled = " +
+                                UserManagerConstants.AttributeValues.USER_DISABLED.getId() +
+                                ", usr_automatically_delete_on = trunc(sysdate) WHERE usr_key = "+user.getEntityId());
+                    } finally {
+                        try {
+                            if (dbProvider != null) {
+                                dbProvider.close();
+                            }
+                        } catch (Exception e) { assert true; }
+                    }
+                }
+
+                // UserManager API delete operation will only execute a delayed delete
+                // if context parameter "operationinitiator" is set to "scheduler".
+                ContextManager.pushContext(null, ContextManager.ContextTypes.ADMIN, null);
+                ContextManager.setValue("operationinitiator", new ContextAwareString("scheduler"), true);
+            }
+
             cal = Calendar.getInstance();
             cal.add(Calendar.SECOND, -10);
             Date start = cal.getTime();
-            userManager.modify(userModify);
+            userManager.delete(usrkey, false);
             cal = Calendar.getInstance();
             cal.add(Calendar.SECOND, 10);
             Date end = cal.getTime();
             waitForOimOrchestrationsToComplete(usrkey, "User", null, OimClientLibrary.timestampDateFormat.format(start), OimClientLibrary.timestampDateFormat.format(end));
-            
-            // UserManager API delete operation will only execute a delayed delete
-            // if context parameter "operationinitiator" is set to "scheduler".
-            ContextManager.pushContext(null, ContextManager.ContextTypes.ADMIN, null);
-            ContextManager.setValue("operationinitiator", new ContextAwareString("scheduler"), true);
-        }
-        
-        cal = Calendar.getInstance();
-        cal.add(Calendar.SECOND, -10);
-        Date start = cal.getTime();
-        userManager.delete(usrkey, false);
-        cal = Calendar.getInstance();
-        cal.add(Calendar.SECOND, 10);
-        Date end = cal.getTime();
-        waitForOimOrchestrationsToComplete(usrkey, "User", null, OimClientLibrary.timestampDateFormat.format(start), OimClientLibrary.timestampDateFormat.format(end));
-        
-        if (force) {
-            ContextManager.popContext();
+
+            if (force) {
+                ContextManager.popContext();
+            }
+
+            Map<String, String> attList = new HashMap<>();
+            attList.put("Process Instance.Descriptive Data", user.getLogin());
+            tcResultSet provTasksResults = provisioningOperationsIntf.findAllOpenProvisioningTasks(attList, new String[]{});
+
+            if (provTasksResults.getRowCount() > 0) {
+                for (int i = 0; i < provTasksResults.getRowCount(); i++) {
+                    provTasksResults.goToRow(i);
+
+                    long taskKey = provTasksResults.getLongValue("Process Instance.Task Details.Key");
+                    String taskName = provTasksResults.getStringValue("Process Definition.Tasks.Task Name");
+                    String objectName = provTasksResults.getStringValue("Objects.Name");
+
+                    System.out.println("*INFO* Going to perform MC action for task " + taskName + " of object " + objectName);
+                    try {
+                        provisioningOperationsIntf.setTasksCompletedManually(new long[]{taskKey});
+                    } catch (Exception e) {
+                        System.out.println("*WARN* Exception during manual complete action for task " + taskName + " of object " + objectName + ": " + e.getMessage());
+                    }
+                }
+            }
+        }  finally {
+            provisioningOperationsIntf.close();
         }
     }
     
     @RobotKeywordOverload
-    public void deleteOimUser(String usrkey) throws ValidationFailedException, AccessDeniedException, UserModifyException, NoSuchUserException, UserDeleteException, UserDisableException, UserLookupException, tcDataSetException, InterruptedException {
+    public void deleteOimUser(String usrkey) throws ValidationFailedException, AccessDeniedException, UserModifyException, NoSuchUserException, UserDeleteException, UserDisableException, UserLookupException, tcDataSetException, InterruptedException, tcAPIException, tcColumnNotFoundException, tcTaskNotFoundException, tcBulkException, SystemConfigurationServiceException, tcDataAccessException, tcClientDataAccessException {
         deleteOimUser(usrkey, false);
     }
     
@@ -620,48 +630,66 @@ public class OimClientLibrary extends AnnotationLibrary {
     public void waitForOimOrchestrationsToComplete() throws tcDataSetException, InterruptedException {
         waitForOimOrchestrationsToComplete(null, null, null, null, null);
     }
+
+    @RobotKeywordOverload
+    public void evaluateOimAccessPoliciesForUser(String usrKey) throws NoSuchUserException, UserNotActiveException, AccessPolicyEvaluationUnauthorizedException, AccessPolicyServiceException, AccessPolicyEvaluationException, tcDataSetException, InterruptedException, tcDataAccessException, tcClientDataAccessException, UserLookupException {
+        evaluateOimAccessPoliciesForUser(usrKey, false);
+    }
     
-    @RobotKeyword("Evaluates the access policies for the user specified by _usrkey_.\n\n" +
+    @RobotKeyword("Evaluates the access policies for the user specified by _usrkey_. Set optional argument _force_ to _True_ to force a policy evaluation, even if it is not necessary.\n\n" +
         "This keyword returns when the evaluation process in OIM has completed.\n\n" +
         "See `Get Oim User` how to obtain _usrkey_.")
-    @ArgumentNames({"usrkey"})
-    public void evaluateOimAccessPoliciesForUser(String usrKey) throws NoSuchUserException, UserNotActiveException, AccessPolicyEvaluationUnauthorizedException, AccessPolicyServiceException, AccessPolicyEvaluationException, tcDataSetException, InterruptedException {
+    @ArgumentNames({"usrkey", "force="})
+    public void evaluateOimAccessPoliciesForUser(String usrKey, boolean force) throws NoSuchUserException, UserNotActiveException, AccessPolicyEvaluationUnauthorizedException, AccessPolicyServiceException, AccessPolicyEvaluationException, tcDataSetException, InterruptedException, tcDataAccessException, tcClientDataAccessException, UserLookupException {
         if (oimClient == null) {
             throw new RuntimeException("There is no connection to OIM");
         }
-        
-        tcDataProvider dbProvider = new tcDataBaseClient();
-        tcDataSet dataSet = new tcDataSet();
-        
-        dataSet.setQuery(dbProvider, "SELECT * FROM user_provisioning_attrs WHERE usr_key = "+usrKey+" AND policy_eval_needed = 1");
-        dataSet.executeQuery();
-        if(dataSet.getTotalRowCount() != 1) {
-            System.out.println("*WARN* No policy evaluation required for user "+usrKey);
-            return;
-        }
-        
-        dataSet.setQuery(dbProvider, "SELECT to_char(sysdate, 'yyyymmddHH24MISS') FROM dual");
-        dataSet.executeQuery();
-        dataSet.goToRow(0);
-        String startTimestamp = dataSet.getString(0);
-        
-        AccessPolicyServiceInternal accessPolicyServiceInternal = oimClient.getService(AccessPolicyServiceInternal.class);
-        ContextManager.pushContext(null, ContextManager.ContextTypes.ADMIN, null);
-        ContextManager.setValue("operationInitiator", new ContextAwareString("scheduler"), true);
-        accessPolicyServiceInternal.evaluatePoliciesForUser(usrKey);
-        ContextManager.popContext();
-        
-        dataSet.setQuery(dbProvider, "SELECT * FROM user_provisioning_attrs WHERE usr_key = "+usrKey+" AND policy_eval_needed = 0 AND policy_eval_in_progress = 0 AND update_date >= to_timestamp('"+startTimestamp+"', 'yyyymmddHH24MISS')");
-        dataSet.executeQuery();
-        int waited = 0;
-        while (dataSet.getTotalRowCount() == 0) {
-            if(waited == maxWaitSeconds) {
-                throw new RuntimeException("Maximum waiting time of " + maxWaitSeconds + " seconds reached");
+
+        tcDataProvider dbProvider = null;
+        try {
+            dbProvider = new tcDataBaseClient();
+            tcDataSet dataSet = new tcDataSet();
+
+            dataSet.setQuery(dbProvider, "SELECT * FROM user_provisioning_attrs WHERE usr_key = " + usrKey + " AND policy_eval_needed = 1");
+            dataSet.executeQuery();
+            if (!force && dataSet.getTotalRowCount() != 1) {
+                System.out.println("*WARN* Not performing policy evaluation for user " + usrKey + "(" + getUserLogin(usrKey) + ") because it is not necessary");
+                return;
+            } else if (force && dataSet.getTotalRowCount() != 1) {
+                System.out.println("*INFO* Going to force unnecessary policy evaluation for user " + usrKey + "(" + getUserLogin(usrKey) + ")");
+
+                dbProvider.writeStatement("UPDATE user_provisioning_attrs SET policy_eval_needed = 1 WHERE usr_key = " + usrKey);
             }
-            
-            Thread.sleep(1000); // 1 second
-            waited++;
-            dataSet.refresh();
+
+            dataSet.setQuery(dbProvider, "SELECT to_char(sysdate, 'yyyymmddHH24MISS') FROM dual");
+            dataSet.executeQuery();
+            dataSet.goToRow(0);
+            String startTimestamp = dataSet.getString(0);
+
+            AccessPolicyServiceInternal accessPolicyServiceInternal = oimClient.getService(AccessPolicyServiceInternal.class);
+            ContextManager.pushContext(null, ContextManager.ContextTypes.ADMIN, null);
+            ContextManager.setValue("operationInitiator", new ContextAwareString("scheduler"), true);
+            accessPolicyServiceInternal.evaluatePoliciesForUser(usrKey);
+            ContextManager.popContext();
+
+            dataSet.setQuery(dbProvider, "SELECT * FROM user_provisioning_attrs WHERE usr_key = " + usrKey + " AND policy_eval_needed = 0 AND policy_eval_in_progress = 0 AND update_date >= to_timestamp('" + startTimestamp + "', 'yyyymmddHH24MISS')");
+            dataSet.executeQuery();
+            int waited = 0;
+            while (dataSet.getTotalRowCount() == 0) {
+                if (waited == maxWaitSeconds) {
+                    throw new RuntimeException("Maximum waiting time of " + maxWaitSeconds + " seconds reached");
+                }
+
+                Thread.sleep(1000); // 1 second
+                waited++;
+                dataSet.refresh();
+            }
+        } finally {
+            try {
+                if (dbProvider != null) {
+                    dbProvider.close();
+                }
+            } catch (Exception e) { assert true; }
         }
     }
     
@@ -679,12 +707,12 @@ public class OimClientLibrary extends AnnotationLibrary {
         "See `Get Oim User` how to obtain a ${usrkey}.")
     @ArgumentNames({"usrkey", "appinstname", "accountstatus=", "parentformsearchdata="})
     public Map<String, Object> getOimAccount(String usrkey, String appinstname, String accountstatus, Map<String, String> parentformsearchdata) throws UserNotFoundException,
-                                                                                        GenericProvisioningException, ApplicationInstanceNotFoundException, GenericAppInstanceServiceException {
-        
+            GenericProvisioningException, ApplicationInstanceNotFoundException, GenericAppInstanceServiceException, UserLookupException, NoSuchUserException {
+
         List<Account> accounts = searchAccounts(usrkey, appinstname, accountstatus, parentformsearchdata, true);
         
         if(accounts.size() != 1) {
-            throw new RuntimeException("Found "+accounts.size()+" accounts for OIM user "+usrkey+" that match: appinstname="+appinstname+",accountstatus="+accountstatus+",parentformsearchdata="+parentformsearchdata);
+            throw new RuntimeException("Found "+accounts.size()+" accounts for OIM user "+usrkey + "(" + getUserLogin(usrkey) + ") that match: appinstname="+appinstname+",accountstatus="+accountstatus+",parentformsearchdata="+parentformsearchdata);
         }
         
         Account account = accounts.get(0);
@@ -694,18 +722,18 @@ public class OimClientLibrary extends AnnotationLibrary {
     
     @RobotKeywordOverload
     public Map<String, Object> getOimAccount(String usrkey, String appinstname, String accountstatus) throws UserNotFoundException, GenericProvisioningException,
-                                                                                                ApplicationInstanceNotFoundException, GenericAppInstanceServiceException {
+            ApplicationInstanceNotFoundException, GenericAppInstanceServiceException, UserLookupException, NoSuchUserException {
         return getOimAccount(usrkey, appinstname, accountstatus, null);
     }
     
     @RobotKeywordOverload
     public Map<String, Object> getOimAccount(String usrkey, String appinstname) throws UserNotFoundException, GenericProvisioningException,
-                                                                                ApplicationInstanceNotFoundException, GenericAppInstanceServiceException {
+            ApplicationInstanceNotFoundException, GenericAppInstanceServiceException, UserLookupException, NoSuchUserException {
         return getOimAccount(usrkey, appinstname, null, null);
     }
     
     private Map<String, Object> getOimAccountReturnMap(Account account) {
-        Map<String, Object> returnMap = new HashMap<String, Object>();
+        Map<String, Object> returnMap = new HashMap<>();
         returnMap.put("accountid", account.getAccountID());
         returnMap.put("accountstatus", account.getAccountStatus());
         if(account.getAccountData() != null) {
@@ -718,10 +746,10 @@ public class OimClientLibrary extends AnnotationLibrary {
             if(account.getAccountData().getChildData() != null) {
                 for (Map.Entry<String, ArrayList<ChildTableRecord>> entry : account.getAccountData().getChildData().entrySet()) {
                     
-                    List<Map<String, String>> childTableEntries = new ArrayList<Map<String, String>>();
+                    List<Map<String, String>> childTableEntries = new ArrayList<>();
                     for (ChildTableRecord childTableRecord : account.getAccountData().getChildData().get(entry.getKey())) {
                         
-                        Map<String, String> childTableEntry = new HashMap<String, String>();
+                        Map<String, String> childTableEntry = new HashMap<>();
                         for (Map.Entry<String, Object> childEntry : childTableRecord.getChildData().entrySet()) {
                             
                             String strFormValue = OimClientLibrary.getFormStringValue(childEntry.getValue());
@@ -739,7 +767,7 @@ public class OimClientLibrary extends AnnotationLibrary {
     @RobotKeyword("Fail if user does not have specified account in OIM. See `Get Oim Account` for more information on usage.")
     @ArgumentNames({"usrkey", "appinstname", "objstatus=", "parentformsearchdata="})
     public void oimAccountShouldExist(String usrkey, String appinstname, String objstatus, Map<String, String> parentformsearchdata) throws UserNotFoundException,
-                                                                                        GenericProvisioningException, ApplicationInstanceNotFoundException, GenericAppInstanceServiceException {
+            GenericProvisioningException, ApplicationInstanceNotFoundException, GenericAppInstanceServiceException, UserLookupException, NoSuchUserException {
         
         boolean populateAccountData = true;
         if(parentformsearchdata == null || parentformsearchdata.isEmpty()) {
@@ -748,28 +776,28 @@ public class OimClientLibrary extends AnnotationLibrary {
         List<Account> accounts = searchAccounts(usrkey, appinstname, objstatus, parentformsearchdata, populateAccountData);
         
         if(accounts.isEmpty()) {
-            throw new RuntimeException("OIM user "+usrkey+" does not have any account that matches: appinstname="+appinstname+",objstatus="+objstatus+",parentformsearchdata="+parentformsearchdata);
+            throw new RuntimeException("OIM user "+usrkey + "(" + getUserLogin(usrkey) + ") does not have any account that matches: appinstname="+appinstname+",objstatus="+objstatus+",parentformsearchdata="+parentformsearchdata);
         }
     }
     
     @RobotKeywordOverload
     public void oimAccountShouldExist(String usrkey, String appinstname, String objstatus) throws UserNotFoundException,
-                                                                                                GenericProvisioningException, ApplicationInstanceNotFoundException,
-                                                                                                GenericAppInstanceServiceException {
+            GenericProvisioningException, ApplicationInstanceNotFoundException,
+            GenericAppInstanceServiceException, UserLookupException, NoSuchUserException {
         oimAccountShouldExist(usrkey, appinstname, objstatus, null);
     }
     
     @RobotKeywordOverload
     public void oimAccountShouldExist(String usrkey, String appinstname) throws UserNotFoundException,
-                                                                                GenericProvisioningException, ApplicationInstanceNotFoundException,
-                                                                                GenericAppInstanceServiceException {
+            GenericProvisioningException, ApplicationInstanceNotFoundException,
+            GenericAppInstanceServiceException, UserLookupException, NoSuchUserException {
         oimAccountShouldExist(usrkey, appinstname, null, null);
     }
     
     @RobotKeyword("Fail if user has specified account in OIM. See `Get Oim Account` for more information on usage.")
     @ArgumentNames({"usrkey", "appinstname", "objstatus=", "parentformsearchdata="})
     public void oimAccountShouldNotExist(String usrkey, String appinstname, String objstatus, Map<String, String> parentformsearchdata) throws UserNotFoundException,
-                                                                                        GenericProvisioningException, ApplicationInstanceNotFoundException, GenericAppInstanceServiceException {
+            GenericProvisioningException, ApplicationInstanceNotFoundException, GenericAppInstanceServiceException, UserLookupException, NoSuchUserException {
         boolean populateAccountData = true;
         if(parentformsearchdata == null || parentformsearchdata.isEmpty()) {
             populateAccountData = false;
@@ -777,23 +805,23 @@ public class OimClientLibrary extends AnnotationLibrary {
         List<Account> accounts = searchAccounts(usrkey, appinstname, objstatus, parentformsearchdata, populateAccountData);
         
         if(accounts.size() == 1) {
-            throw new RuntimeException("OIM user "+usrkey+" has 1 account that matches: appinstname="+appinstname+",objstatus="+objstatus+",parentformsearchdata="+parentformsearchdata);
+            throw new RuntimeException("OIM user "+usrkey+" ("+getUserLogin(usrkey)+") has 1 account that matches: appinstname="+appinstname+",objstatus="+objstatus+",parentformsearchdata="+parentformsearchdata);
         } else if(accounts.size() > 1) {
-            throw new RuntimeException("OIM user "+usrkey+" has "+accounts.size()+" accounts that match: appinstname="+appinstname+",objstatus="+objstatus+",parentformsearchdata="+parentformsearchdata);
+            throw new RuntimeException("OIM user "+usrkey+" ("+getUserLogin(usrkey)+") has "+accounts.size()+" accounts that match: appinstname="+appinstname+",objstatus="+objstatus+",parentformsearchdata="+parentformsearchdata);
         }
     }
     
     @RobotKeywordOverload
     public void oimAccountShouldNotExist(String usrkey, String appinstname, String objstatus) throws UserNotFoundException,
-                                                                                                GenericProvisioningException, ApplicationInstanceNotFoundException,
-                                                                                                GenericAppInstanceServiceException {
+            GenericProvisioningException, ApplicationInstanceNotFoundException,
+            GenericAppInstanceServiceException, UserLookupException, NoSuchUserException {
         oimAccountShouldNotExist(usrkey, appinstname, objstatus, null);
     }
     
     @RobotKeywordOverload
     public void oimAccountShouldNotExist(String usrkey, String appinstname) throws UserNotFoundException,
-                                                                                GenericProvisioningException, ApplicationInstanceNotFoundException,
-                                                                                GenericAppInstanceServiceException {
+            GenericProvisioningException, ApplicationInstanceNotFoundException,
+            GenericAppInstanceServiceException, UserLookupException, NoSuchUserException {
         oimAccountShouldNotExist(usrkey, appinstname, null, null);
     }
     
@@ -817,7 +845,7 @@ public class OimClientLibrary extends AnnotationLibrary {
         } else {
             Role role = roles.get(0);
             
-            Map<String, String> returnMap = new HashMap<String, String>();
+            Map<String, String> returnMap = new HashMap<>();
             for (Map.Entry<String, Object> entry : role.getAttributes().entrySet()) {
                 
                 String strFormValue = OimClientLibrary.getFormStringValue(entry.getValue());
@@ -849,7 +877,7 @@ public class OimClientLibrary extends AnnotationLibrary {
         } else {
             User user = users.get(0);
             
-            Map<String, String> returnMap = new HashMap<String, String>();
+            Map<String, String> returnMap = new HashMap<>();
             for (Map.Entry<String, Object> entry : user.getAttributes().entrySet()) {
                 
                 String strFormValue = OimClientLibrary.getFormStringValue(entry.getValue());
@@ -883,14 +911,14 @@ public class OimClientLibrary extends AnnotationLibrary {
             Object currentValue = parentFormData.get(key);
             Object newValue = null;
             
-            if (currentValue instanceof Date) {
-                if(!newValueStr.isEmpty()) {
-                    newValue = timestampDateFormat.parse(newValueStr);
-                }
-            } else if (currentValue instanceof Timestamp) {
+            if (currentValue instanceof Timestamp) {
                 if(!newValueStr.isEmpty()) {
                     Date d = timestampDateFormat.parse(newValueStr);
                     newValue = new Timestamp(d.getTime());
+                }
+            } else if (currentValue instanceof Date) {
+                if(!newValueStr.isEmpty()) {
+                    newValue = timestampDateFormat.parse(newValueStr);
                 }
             } else {
                 newValue = newValueStr;
@@ -941,7 +969,7 @@ public class OimClientLibrary extends AnnotationLibrary {
         
         roleManager.modify(roleModify);
         
-        Map<String, String> rolesearchattributes = new HashMap<String, String>();
+        Map<String, String> rolesearchattributes = new HashMap<>();
         rolesearchattributes.put(RoleManagerConstants.RoleAttributeName.KEY.getId(), rolekey);
         return getOimRole(rolesearchattributes);
     }
@@ -957,7 +985,7 @@ public class OimClientLibrary extends AnnotationLibrary {
                     "| Should Be Equal | ${startdate} | ${newstartdate} |\n"+
                     "See `Get Oim User` how to obtain a ${usrkey}.")
     @ArgumentNames({"usrkey","modifyattributes"})
-    public Map<String, String> modifyOimUser(String usrkey, Map<String, String> modifyattributes) throws AccessDeniedException, UserSearchException, NoSuchAttributeException, ConfigManagerException, ParseException, ValidationFailedException, UserModifyException, NoSuchUserException {
+    public Map<String, String> modifyOimUser(String usrkey, Map<String, String> modifyattributes) throws AccessDeniedException, UserSearchException, NoSuchAttributeException, ConfigManagerException, ParseException, ValidationFailedException, UserModifyException, NoSuchUserException, UserLookupException {
         
         User userModify = new User(usrkey);
         
@@ -981,11 +1009,11 @@ public class OimClientLibrary extends AnnotationLibrary {
             userModify.setAttribute(key, value);
         }
         
-        System.out.println("*INFO* Modifying user "+usrkey+" with attributes "+userModify.toString());
+        System.out.println("*INFO* Modifying user "+usrkey+" ("+getUserLogin(usrkey)+") with attributes "+userModify.toString());
         
         userManager.modify(userModify);
         
-        Map<String, String> usersearchattributes = new HashMap<String, String>();
+        Map<String, String> usersearchattributes = new HashMap<>();
         usersearchattributes.put(UserManagerConstants.AttributeName.USER_KEY.getId(), usrkey);
         return getOimUser(usersearchattributes);
     }
@@ -1036,7 +1064,7 @@ public class OimClientLibrary extends AnnotationLibrary {
    
     @RobotKeyword("Fail if given access policy is not present in OIM.")
     @ArgumentNames({"policyname"})
-    public void oimAccessPolicyShouldExist(String policyname) throws tcAPIException, tcAPIException {
+    public void oimAccessPolicyShouldExist(String policyname) throws tcAPIException {
        
         tcResultSet policies = searchAccessPolicies(policyname);
        
@@ -1047,7 +1075,7 @@ public class OimClientLibrary extends AnnotationLibrary {
    
     @RobotKeyword("Fail if given access policy is present in OIM.")
     @ArgumentNames({"policyname"})
-    public void oimAccessPolicyShouldNotExist(String policyname) throws tcAPIException, tcAPIException {
+    public void oimAccessPolicyShouldNotExist(String policyname) throws tcAPIException {
        
         tcResultSet policies = searchAccessPolicies(policyname);
        
@@ -1137,7 +1165,7 @@ public class OimClientLibrary extends AnnotationLibrary {
         
         tcLookupOperationsIntf lookupIntf = oimClient.getService(tcLookupOperationsIntf.class);
         
-        Map<String, String> filter = new HashMap<String, String>(2);
+        Map<String, String> filter = new HashMap<>(2);
         if(encode != null && !encode.isEmpty()) {
             filter.put(LOOKUP_ENCODE_NAME, encode);
         }
@@ -1148,7 +1176,7 @@ public class OimClientLibrary extends AnnotationLibrary {
         
         System.out.println("*INFO* Found " + resultSet.getRowCount() + " entries in lookup " + lookupcode + " that match " + filter);
         
-        Map<String, String> updateMap = new HashMap<String, String>(2);
+        Map<String, String> updateMap = new HashMap<>(2);
         for(int i=0; i<resultSet.getRowCount(); i++) {
             resultSet.goToRow(i);
             
@@ -1174,7 +1202,7 @@ public class OimClientLibrary extends AnnotationLibrary {
     
     @RobotKeyword("Set the password of user identified by _usrkey_ to _newpassword_. See `Get Oim User` how to obtain a ${usrkey}.")
     @ArgumentNames({"usrkey","newpassword"})
-    public void setOimUserPassword(String usrkey, String newpassword) throws AccessDeniedException, UserManagerException, NoSuchUserException, SearchKeyNotUniqueException {
+    public void setOimUserPassword(String usrkey, String newpassword) throws AccessDeniedException, UserManagerException, SearchKeyNotUniqueException {
         
         UserManager userManager = oimClient.getService(UserManager.class);
         userManager.changePassword(UserManagerConstants.AttributeName.USER_KEY.getId(), usrkey, newpassword.toCharArray(), false);
@@ -1213,7 +1241,7 @@ public class OimClientLibrary extends AnnotationLibrary {
         
         tcLookupOperationsIntf lookupIntf = oimClient.getService(tcLookupOperationsIntf.class);
         
-        Map<String, String> filter = new HashMap<String, String>(2);
+        Map<String, String> filter = new HashMap<>(2);
         if(encode != null && !encode.isEmpty()) {
             filter.put(LOOKUP_ENCODE_NAME, encode);
         }
@@ -1230,7 +1258,7 @@ public class OimClientLibrary extends AnnotationLibrary {
             throw new RuntimeException("Multiple entries in OIM lookup '"+lookupcode+"' match "+filter);
         } else {
             resultSet.goToRow(0);
-            Map<String, String> returnMap = new HashMap<String, String>(2);
+            Map<String, String> returnMap = new HashMap<>(2);
             returnMap.put("encode", resultSet.getStringValue(LOOKUP_ENCODE_NAME));
             returnMap.put("decode", resultSet.getStringValue(LOOKUP_DECODE_NAME));
             return returnMap;
@@ -1280,7 +1308,7 @@ public class OimClientLibrary extends AnnotationLibrary {
         
         tcLookupOperationsIntf lookupIntf = oimClient.getService(tcLookupOperationsIntf.class);
         
-        Map<String, String> filter = new HashMap<String, String>(2);
+        Map<String, String> filter = new HashMap<>(2);
         if(encode != null && !encode.isEmpty()) {
             filter.put(LOOKUP_ENCODE_NAME, encode);
         }
@@ -1319,38 +1347,70 @@ public class OimClientLibrary extends AnnotationLibrary {
         if(schedulerService.getJobDetail(jobname) == null) {
             throw new RuntimeException("No job found with name '" + jobname + "'");
         }
-       
+
         int jobStatus = schedulerService.getStatusOfJob(jobname);
-       
-        if(jobStatus != JobStatus.STOPPED.ordinal() && jobStatus != JobStatus.RUNNING.ordinal()) {
-            throw new RuntimeException("Job '" + jobname + "' is not in STOPPED or RUNNING state");
-        } else if(jobStatus == JobStatus.RUNNING.ordinal()) {
-            System.out.println("*INFO* Job '" + jobname + "' is already in RUNNING state");
-        } else {
-            schedulerService.triggerNow(jobname);
-           
-            System.out.println("*INFO* Job '" + jobname + "' has been triggered");
+
+        if(jobStatus != JobStatus.STOPPED.ordinal()) {
+            throw new RuntimeException("Job '" + jobname + "' is not in STOPPED state");
         }
-       
-        if(wait) {
-            do {
-                Thread.sleep(10000); // 10 seconds
-                jobStatus = schedulerService.getStatusOfJob(jobname);
-            } while (jobStatus == JobStatus.RUNNING.ordinal());
-           
-            System.out.println("*INFO* Job '" + jobname + "' is no longer in RUNNING state");
-           
-            JobHistory jobHistory = schedulerService.getLastHistoryOfJob(jobname);
-            int jobHistoryStatus = Integer.valueOf(jobHistory.getStatus());
-           
-            String level;
-            if(jobStatus != JobStatus.STOPPED.ordinal() || jobHistoryStatus != JobStatus.STOPPED.ordinal()) {
-                level = "*WARN*";
-            } else {
-                level = "*INFO*";
+
+        long triggerTimestamp = System.currentTimeMillis();
+        // Allow for 10 seconds time difference between test system and OIM server
+        triggerTimestamp = triggerTimestamp - 10000L;
+
+        System.out.println("*INFO* Triggering job " + jobname);
+
+        schedulerService.triggerNow(jobname);
+        if (wait) {
+            System.out.println("*INFO* Waiting for job " + jobname + " to finish...");
+
+            final List<Object> statusObject = Arrays.asList(new Object[] {JobStatus.NONE.ordinal(), triggerTimestamp, null, null});
+            Runnable statusRunnable = new Runnable() {
+                public void run() {
+                    System.out.println("*TRACE* Current job status is " + JobStatus.values()[(int) statusObject.get(0)] + ", triggerTimestamp=" + statusObject.get(1) + ", startTime=" + statusObject.get(2) + ", endTime=" + statusObject.get(3));
+                }
+            };
+
+            ScheduledExecutorService executor = Executors.newScheduledThreadPool(1);
+            JobHistory jh = null;
+            long startTime = 0L;
+            long endTime = 0L;
+            try {
+                executor.scheduleAtFixedRate(statusRunnable, 30, 30, TimeUnit.SECONDS);
+
+                do {
+                    Thread.sleep(1000);
+                    List<JobHistory> jhl = schedulerService.getHistoryOfJob(jobname);
+                    if(jhl.size() > 0) {
+                        jh = jhl.get(0);
+
+                        startTime = jh.getJobStartTime().getTime();
+                        endTime = (jh.getJobEndTime() != null) ? jh.getJobEndTime().getTime() : 0;
+
+                        jobStatus = schedulerService.getStatusOfJob(jobname);
+
+                        statusObject.set(0, jobStatus);
+                        statusObject.set(2, startTime);
+                        statusObject.set(3, endTime);
+                    }
+                } while (!(startTime >= triggerTimestamp && endTime >= startTime));
+            } finally {
+                executor.shutdownNow();
             }
-           
-            System.out.println(level + " Job '" + jobname + "' has finished with status " + JobStatus.values()[jobStatus] + " and history status " + JobStatus.values()[jobHistoryStatus]);
+
+            System.out.println("*INFO* Job " + jobname + " is no longer running, current status is " + JobStatus.values()[jobStatus]);
+
+            long runTime = endTime - startTime;
+            String elapsed =
+                    String.format("Elapsed: %d min, %d sec, %d ms", TimeUnit.MILLISECONDS.toMinutes(runTime), TimeUnit.MILLISECONDS.toSeconds(runTime) - TimeUnit.MINUTES.toSeconds(TimeUnit.MILLISECONDS.toMinutes(runTime)),
+                            runTime - TimeUnit.SECONDS.toMillis(TimeUnit.MILLISECONDS.toSeconds(runTime)));
+            System.out.println("*INFO* " + elapsed);
+
+            int jobhistStatus = (jh != null) ? Integer.valueOf(jh.getStatus()):JobStatus.NONE.ordinal();
+
+            if (jobStatus != JobStatus.STOPPED.ordinal() || jobhistStatus != JobStatus.STOPPED.ordinal()) {
+                System.out.println("*WARN* Job " + jobname + " has finished with status " + JobStatus.values()[jobStatus] + " and history status " + JobStatus.values()[jobhistStatus] + ".");
+            }
         }
     }
     
@@ -1379,10 +1439,11 @@ public class OimClientLibrary extends AnnotationLibrary {
     }
     
     private List<Account> searchAccounts(String usrkey, String appinstname, String accountstatus, Map<String, String> parentformsearchdata, boolean populateAccountData) throws UserNotFoundException,
-                                                                                        GenericProvisioningException, ApplicationInstanceNotFoundException, GenericAppInstanceServiceException {
+            GenericProvisioningException, ApplicationInstanceNotFoundException, GenericAppInstanceServiceException, UserLookupException, NoSuchUserException {
         if (oimClient == null) {
             throw new RuntimeException("There is no connection to OIM");
         }
+
         ProvisioningService provisioningService = oimClient.getService(ProvisioningService.class);
         
         ApplicationInstanceService applicationInstanceService = oimClient.getService(ApplicationInstanceService.class);
@@ -1394,7 +1455,7 @@ public class OimClientLibrary extends AnnotationLibrary {
             criteria = new SearchCriteria(criteria, new SearchCriteria(ProvisioningConstants.AccountSearchAttribute.ACCOUNT_STATUS.getId(), accountstatus, SearchCriteria.Operator.EQUAL), SearchCriteria.Operator.AND);
         }
         
-        System.out.println("*INFO* Searching for accounts for user with key "+usrkey+" matching: criteria="+criteria.toString());
+        System.out.println("*INFO* Searching for accounts for user " + usrkey + "(" + getUserLogin(usrkey) + ") matching: criteria="+criteria.toString());
         
         List<Account> accounts = provisioningService.getAccountsProvisionedToUser(usrkey, criteria, null, populateAccountData);
         
@@ -1451,7 +1512,8 @@ public class OimClientLibrary extends AnnotationLibrary {
     
     // Returns all rows in specified childform that match specified searchcriteria
     private List<Map<String, String>> searchChildForm(Map<String, Object> account, String childform, Map<String, String> searchcriteria) {
-        
+
+        @SuppressWarnings("unchecked")
         List<Map<String, String>> childFormList = (List<Map<String, String>>)account.get(childform);
         
         if(childFormList == null) {
@@ -1464,7 +1526,7 @@ public class OimClientLibrary extends AnnotationLibrary {
     // Returns all rows in specified childform that match specified searchcriteria
     private List<Map<String, String>> searchChildFormEntries(List<Map<String, String>> childFormList, Map<String, String> searchcriteria) {
         
-        List<Map<String, String>> allMatchingRows = new ArrayList<Map<String, String>>();
+        List<Map<String, String>> allMatchingRows = new ArrayList<>();
         
         for (Map<String, String> childFormRow : childFormList) {
             boolean matchingRow = true;
@@ -1495,11 +1557,11 @@ public class OimClientLibrary extends AnnotationLibrary {
         
         if(formValue == null) {
             strFormValue = "";
-        } else if (formValue instanceof Date) {
-            strFormValue = timestampDateFormat.format(formValue);
         } else if (formValue instanceof Timestamp) {
             Timestamp t = (Timestamp) formValue;
             strFormValue = timestampDateFormat.format(new Date(t.getTime()));
+        } else if (formValue instanceof Date) {
+            strFormValue = timestampDateFormat.format(formValue);
         } else {
             strFormValue = formValue.toString();
         }
@@ -1578,24 +1640,34 @@ public class OimClientLibrary extends AnnotationLibrary {
         
         System.out.println("*INFO* Searching for roles matching '"+searchCriteria+"'");
        
-        List<Role> roles = roleManager.search(searchCriteria, null, null);
-       
-        return roles;
+        return roleManager.search(searchCriteria, null, null);
     }
    
-    private tcResultSet searchAccessPolicies (String policyname) throws tcAPIException, tcAPIException {
+    private tcResultSet searchAccessPolicies (String policyname) throws tcAPIException {
         if (oimClient == null) {
             throw new RuntimeException("There is no connection to OIM");
         }
         tcAccessPolicyOperationsIntf polIntf = oimClient.getService(tcAccessPolicyOperationsIntf.class);
        
-        Map<String,String> hm = new HashMap<String,String>(1);
+        Map<String,String> hm = new HashMap<>(1);
         hm.put("Access Policies.Name", policyname);
        
         System.out.println("*INFO* Searching for access policy having name '"+policyname+"'");
        
-        tcResultSet ts = polIntf.findAccessPolicies(hm);
-       
-        return ts;
+        return polIntf.findAccessPolicies(hm);
+    }
+
+    private String getUserLogin(String usrKey) throws UserLookupException, NoSuchUserException {
+        if (oimClient == null) {
+            throw new RuntimeException("There is no connection to OIM");
+        }
+        UserManager userManager = oimClient.getService(UserManager.class);
+
+        Set<String> returnAttributes = new HashSet<>();
+        returnAttributes.add(UserManagerConstants.AttributeName.USER_LOGIN.getId());
+
+        User user = userManager.getDetails(usrKey, returnAttributes, false);
+
+        return user.getLogin();
     }
 }
