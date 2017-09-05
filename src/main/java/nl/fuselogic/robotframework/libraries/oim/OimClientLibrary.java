@@ -43,12 +43,16 @@ import oracle.iam.configservice.exception.ConfigManagerException;
 import oracle.iam.configservice.exception.NoSuchAttributeException;
 import oracle.iam.configservice.vo.AttributeDefinition;
 import oracle.iam.identity.exception.*;
+import oracle.iam.identity.orgmgmt.api.OrganizationManager;
+import oracle.iam.identity.orgmgmt.api.OrganizationManagerConstants;
+import oracle.iam.identity.orgmgmt.vo.Organization;
 import oracle.iam.identity.rolemgmt.api.RoleManager;
 import oracle.iam.identity.rolemgmt.api.RoleManagerConstants;
 import oracle.iam.identity.rolemgmt.vo.Role;
 import oracle.iam.identity.usermgmt.api.UserManager;
 import oracle.iam.identity.usermgmt.api.UserManagerConstants;
 import oracle.iam.identity.usermgmt.vo.User;
+import oracle.iam.identity.usermgmt.vo.UserManagerResult;
 import oracle.iam.platform.OIMClient;
 import oracle.iam.platform.authz.exception.AccessDeniedException;
 import oracle.iam.platform.context.ContextAwareString;
@@ -356,6 +360,64 @@ public class OimClientLibrary extends AnnotationLibrary {
         System.out.println("*INFO* Deleting role "+rolekey);
         
         roleManager.delete(rolekey);
+    }
+
+    @RobotKeyword(  "Creates a user in OIM. Use getOimUser for the list of available attributes.")
+    @ArgumentNames({"attributes"})
+    public String createOimUser(Map<String, String> attributes) throws UserAlreadyExistsException, ValidationFailedException, UserCreateException, OrganizationManagerException {
+        if (attributes == null) {
+            throw new RuntimeException("attributes should be filled. When creating a user.");
+        }
+
+        if (oimClient == null) {
+            throw new RuntimeException("There is no connection to OIM");
+        }
+
+        // move all entries to a hashmap. Since the User constructor needs a hashmap.
+        HashMap<String, Object> userData = new HashMap<>();
+        for (Map.Entry<String, String> entry : attributes.entrySet()) {
+            userData.put(entry.getKey(), entry.getValue());
+        }
+
+        // get the login for the user, or null when it should be generated
+        String login = (String) userData.get("User Login");
+
+        // set the last name attribute since it is required.
+        if (!userData.containsKey("Last Name")) {
+            if (userData.containsKey("LastNameOwn")) {
+                userData.put("Last Name", userData.get("LastNameOwn"));
+            } else {
+                throw new RuntimeException("userData not correct: attribute \'LastNameOwn\' or \'Last Name\' is required.");
+            }
+        }
+
+        // set the organization
+        if (!userData.containsKey("act_key")) {
+            // set the organization to either Organization or IDM Organization
+            String organization_name = (String) ((userData.containsKey("Organization")) ? userData.get("Organization") : userData.get("IDM Organization"));
+
+            if (organization_name == null){
+                throw new RuntimeException("userData not correct: attribute \'Organization\' or \'act_key\' is required.");
+            }
+
+            try {
+                // get the act_key from OIM.
+                OrganizationManager organizationManager = oimClient.getService(OrganizationManager.class);
+
+                Organization organization = organizationManager.getDetails(organization_name, null, true);
+                String actKey = organization.getEntityId();
+                userData.put("act_key", actKey);
+            } catch (Exception e){
+                throw new RuntimeException("The organization name can not be found. (Check if the logged in user has the correct rights.)", e);
+            }
+
+        }
+
+        UserManager userManager = oimClient.getService(UserManager.class);
+        User user = new User(login, userData);
+
+        UserManagerResult result = userManager.create(user);
+        return result.getEntityId();
     }
     
     @RobotKeyword(  "Deletes specified user in OIM.\n\n"+
