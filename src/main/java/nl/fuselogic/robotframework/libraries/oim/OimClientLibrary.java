@@ -362,55 +362,38 @@ public class OimClientLibrary extends AnnotationLibrary {
         roleManager.delete(rolekey);
     }
 
-    @RobotKeyword(  "Creates a user in OIM. Use getOimUser for the list of available attributes.")
-    @ArgumentNames({"attributes"})
-    public String createOimUser(Map<String, String> attributes) throws UserAlreadyExistsException, ValidationFailedException, UserCreateException, OrganizationManagerException {
-        if (attributes == null) {
-            throw new RuntimeException("attributes should be filled. When creating a user.");
+    @RobotKeyword(  "Creates a user in OIM and returns the ${usrkey} of the new user. Use `Get Oim User` for the list of available attributes.\n\n"+
+                    "Argument _userattributes_ is a dictionary. For default OIM user attribute names see [http://docs.oracle.com/cd/E40329_01/apirefs.1112/e28159/oracle/iam/identity/usermgmt/api/UserManagerConstants.AttributeName.html|UserManagerConstants.AttributeName].\n\n" +
+                    "Any date typed attributes must be specified as _yyyy-MM-dd HH:mm:ss.SSS_, ready to use with [http://robotframework.org/robotframework/latest/libraries/DateTime.html|DateTime].\n\n")
+    @ArgumentNames({"userattributes"})
+    public String createOimUser(Map<String, String> userattributes) throws UserAlreadyExistsException, ValidationFailedException, UserCreateException, OrganizationManagerException {
+        if (userattributes == null) {
+            throw new RuntimeException("No attributes are passed. Attributes should be passed to specify the new user.");
         }
 
         if (oimClient == null) {
             throw new RuntimeException("There is no connection to OIM");
         }
 
-        // move all entries to a hashmap. Since the User constructor needs a hashmap.
+        // move all entries to a hashmap. Since the User constructor needs a hashmap. And we got a map.
         HashMap<String, Object> userData = new HashMap<>();
-        for (Map.Entry<String, String> entry : attributes.entrySet()) {
+        for (Map.Entry<String, String> entry : userattributes.entrySet()) {
             userData.put(entry.getKey(), entry.getValue());
         }
 
         // get the login for the user, or null when it should be generated
-        String login = (String) userData.get("User Login");
-
-        // set the last name attribute since it is required.
-        if (!userData.containsKey("Last Name")) {
-            if (userData.containsKey("LastNameOwn")) {
-                userData.put("Last Name", userData.get("LastNameOwn"));
-            } else {
-                throw new RuntimeException("userData not correct: attribute \'LastNameOwn\' or \'Last Name\' is required.");
-            }
-        }
+        String login = (String) userData.get(UserManagerConstants.AttributeName.USER_LOGIN.getId());
 
         // set the organization
-        if (!userData.containsKey("act_key")) {
-            // set the organization to either Organization or IDM Organization
-            String organization_name = (String) ((userData.containsKey("Organization")) ? userData.get("Organization") : userData.get("IDM Organization"));
+        if (userData.containsKey(OrganizationManagerConstants.AttributeName.ORG_NAME.getId())){
+            // the user specified the organization name instead of the organization key. Going to get the organization key
+            String organizationName = (String) userData.get(OrganizationManagerConstants.AttributeName.ORG_NAME.getId());
 
-            if (organization_name == null){
-                throw new RuntimeException("userData not correct: attribute \'Organization\' or \'act_key\' is required.");
-            }
+            OrganizationManager organizationManager = oimClient.getService(OrganizationManager.class);
 
-            try {
-                // get the act_key from OIM.
-                OrganizationManager organizationManager = oimClient.getService(OrganizationManager.class);
-
-                Organization organization = organizationManager.getDetails(organization_name, null, true);
-                String actKey = organization.getEntityId();
-                userData.put("act_key", actKey);
-            } catch (Exception e){
-                throw new RuntimeException("The organization name can not be found. (Check if the logged in user has the correct rights.)", e);
-            }
-
+            Organization organization = organizationManager.getDetails(organizationName, null, true);
+            String actKey = organization.getEntityId();
+            userData.put(OrganizationManagerConstants.AttributeName.ID_FIELD.getId(), actKey);
         }
 
         UserManager userManager = oimClient.getService(UserManager.class);
