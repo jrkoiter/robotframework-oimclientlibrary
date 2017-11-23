@@ -376,6 +376,7 @@ public class OimClientLibrary extends AnnotationLibrary {
         }
 
         ConfigManager configManager = oimClient.getService(ConfigManager.class);
+        Map<String, AttributeDefinition> userEntityAttributes = configManager.getAttributes(Constants.Entity.USER);
 
         // move all entries to a hashmap. Since the User constructor needs a hashmap. And we got a map.
         // also parse the date and number fields
@@ -384,14 +385,16 @@ public class OimClientLibrary extends AnnotationLibrary {
             String key = entry.getKey();
             Object value = entry.getValue();
 
-            AttributeDefinition attributeDefinition = configManager.getAttribute(Constants.Entity.USER, key);
-            if (attributeDefinition.getBackendType().equalsIgnoreCase("date")){
-                if (!value.toString().isEmpty()){
-                    value = timestampDateFormat.parse(value.toString());
-                }
-            }else if (attributeDefinition.getBackendType().equalsIgnoreCase("number")) {
-                if(!value.toString().isEmpty()) {
-                    value = Long.valueOf(value.toString());
+            // only check user attributes to be converted. (Organization Name, is in the attributes but is not a user attribute, will be updated later.)
+            if (userEntityAttributes.containsKey(key)){
+                if (userEntityAttributes.get(key).getBackendType().equalsIgnoreCase("date")){
+                    if (!value.toString().isEmpty()){
+                        value = timestampDateFormat.parse(value.toString());
+                    }
+                } else if (userEntityAttributes.get(key).getBackendType().equalsIgnoreCase("number")){
+                    if (!value.toString().isEmpty()){
+                        value = Long.valueOf(value.toString());
+                    }
                 }
             }
             userData.put(key, value);
