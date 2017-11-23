@@ -399,14 +399,6 @@ public class OimClientLibrary extends AnnotationLibrary {
             }
             userData.put(key, value);
         }
-        if (userData.containsKey(UserManagerConstants.AttributeName.USER_LOGIN.getId())){
-            System.out.println("*INFO* Creating user (" + userData.get(UserManagerConstants.AttributeName.USER_LOGIN.getId()) + ") with attributes " + userData.toString());
-        } else{
-            System.out.println("*INFO* Creating user with attributes " + userData.toString());
-        }
-
-        // get the login for the user, or null when it should be generated
-        String login = (String) userData.get(UserManagerConstants.AttributeName.USER_LOGIN.getId());
 
         // set the organization
         if (userData.containsKey(OrganizationManagerConstants.AttributeName.ORG_NAME.getId())){
@@ -416,11 +408,20 @@ public class OimClientLibrary extends AnnotationLibrary {
             OrganizationManager organizationManager = oimClient.getService(OrganizationManager.class);
 
             Organization organization = organizationManager.getDetails(organizationName, null, true);
-            String actKey = organization.getEntityId();
+            String organizationKey = organization.getEntityId();
+            Long actKey = Long.valueOf(organizationKey);
             userData.put(OrganizationManagerConstants.AttributeName.ID_FIELD.getId(), actKey);
         }
 
+        if (userData.containsKey(UserManagerConstants.AttributeName.USER_LOGIN.getId())){
+            System.out.println("*INFO* Creating user (" + userData.get(UserManagerConstants.AttributeName.USER_LOGIN.getId()) + ") with attributes " + userData.toString());
+        } else{
+            System.out.println("*INFO* Creating user with attributes " + userData.toString());
+        }
+
         UserManager userManager = oimClient.getService(UserManager.class);
+        // get the login for the user, or null when it should be generated
+        String login = (String) userData.get(UserManagerConstants.AttributeName.USER_LOGIN.getId());
         User user = new User(login, userData);
 
         UserManagerResult result = userManager.create(user);
