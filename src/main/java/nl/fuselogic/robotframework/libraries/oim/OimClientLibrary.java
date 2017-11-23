@@ -408,7 +408,7 @@ public class OimClientLibrary extends AnnotationLibrary {
         // set the organization
         if (userData.containsKey(OrganizationManagerConstants.AttributeName.ORG_NAME.getId())){
             // the user specified the organization name instead of the organization key. Going to get the organization key
-            String organizationName = (String) userData.get(OrganizationManagerConstants.AttributeName.ORG_NAME.getId());
+            String organizationName = (String) userData.remove(OrganizationManagerConstants.AttributeName.ORG_NAME.getId());
 
             OrganizationManager organizationManager = oimClient.getService(OrganizationManager.class);
 
