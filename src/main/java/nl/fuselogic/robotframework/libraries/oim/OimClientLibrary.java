@@ -365,9 +365,9 @@ public class OimClientLibrary extends AnnotationLibrary {
     @RobotKeyword(  "Creates a user in OIM and returns the ${usrkey} of the new user. Use `Get Oim User` for the list of available attributes.\n\n"+
                     "Argument _userattributes_ is a dictionary. For default OIM user attribute names see [http://docs.oracle.com/cd/E40329_01/apirefs.1112/e28159/oracle/iam/identity/usermgmt/api/UserManagerConstants.AttributeName.html|UserManagerConstants.AttributeName].\n\n" +
                     "Any date typed attributes must be specified as _yyyy-MM-dd HH:mm:ss.SSS_, ready to use with [http://robotframework.org/robotframework/latest/libraries/DateTime.html|DateTime].\n\n")
-    @ArgumentNames({"userattributes"})
-    public String createOimUser(Map<String, String> userattributes) throws UserAlreadyExistsException, ValidationFailedException, UserCreateException, OrganizationManagerException {
-        if (userattributes == null) {
+    @ArgumentNames({"userAttributes"})
+    public String createOimUser(Map<String, String> userAttributes) throws UserAlreadyExistsException, ValidationFailedException, UserCreateException, OrganizationManagerException, ConfigManagerException, ParseException {
+        if (userAttributes == null) {
             throw new RuntimeException("No attributes are passed. Attributes should be passed to specify the new user.");
         }
 
@@ -375,10 +375,31 @@ public class OimClientLibrary extends AnnotationLibrary {
             throw new RuntimeException("There is no connection to OIM");
         }
 
+        ConfigManager configManager = oimClient.getService(ConfigManager.class);
+
         // move all entries to a hashmap. Since the User constructor needs a hashmap. And we got a map.
+        // also parse the date and number fields
         HashMap<String, Object> userData = new HashMap<>();
-        for (Map.Entry<String, String> entry : userattributes.entrySet()) {
-            userData.put(entry.getKey(), entry.getValue());
+        for (Map.Entry<String, String> entry : userAttributes.entrySet()) {
+            String key = entry.getKey();
+            Object value = entry.getValue();
+
+            AttributeDefinition attributeDefinition = configManager.getAttribute(Constants.Entity.USER, key);
+            if (attributeDefinition.getBackendType().equalsIgnoreCase("date")){
+                if (!value.toString().isEmpty()){
+                    value = timestampDateFormat.parse(value.toString());
+                }
+            }else if (attributeDefinition.getBackendType().equalsIgnoreCase("number")) {
+                if(!value.toString().isEmpty()) {
+                    value = Long.valueOf(value.toString());
+                }
+            }
+            userData.put(key, value);
+        }
+        if (userData.containsKey(UserManagerConstants.AttributeName.USER_LOGIN.getId())){
+            System.out.println("*INFO* Creating user (" + userData.get(UserManagerConstants.AttributeName.USER_LOGIN.getId()) + ") with attributes " + userData.toString());
+        } else{
+            System.out.println("*INFO* Creating user with attributes " + userData.toString());
         }
 
         // get the login for the user, or null when it should be generated
@@ -1033,14 +1054,14 @@ public class OimClientLibrary extends AnnotationLibrary {
     public Map<String, String> modifyOimUser(String usrkey, Map<String, String> modifyattributes) throws AccessDeniedException, UserSearchException, NoSuchAttributeException, ConfigManagerException, ParseException, ValidationFailedException, UserModifyException, NoSuchUserException, UserLookupException {
         
         User userModify = new User(usrkey);
-        
+
         ConfigManager configManager = oimClient.getService(ConfigManager.class);
         UserManager userManager = oimClient.getService(UserManager.class);
-        
+
         for (Map.Entry<String, String> entry : modifyattributes.entrySet()) {
             String key = entry.getKey();
             Object value = entry.getValue();
-            
+
             AttributeDefinition attributeDefinition = configManager.getAttribute(Constants.Entity.USER, key);
             if (attributeDefinition.getBackendType().equalsIgnoreCase("date")) {
                 if(!value.toString().isEmpty()) {
@@ -1053,7 +1074,7 @@ public class OimClientLibrary extends AnnotationLibrary {
             }
             userModify.setAttribute(key, value);
         }
-        
+
         System.out.println("*INFO* Modifying user "+usrkey+" ("+getUserLogin(usrkey)+") with attributes "+userModify.toString());
         
         userManager.modify(userModify);
