@@ -43,12 +43,16 @@ import oracle.iam.configservice.exception.ConfigManagerException;
 import oracle.iam.configservice.exception.NoSuchAttributeException;
 import oracle.iam.configservice.vo.AttributeDefinition;
 import oracle.iam.identity.exception.*;
+import oracle.iam.identity.orgmgmt.api.OrganizationManager;
+import oracle.iam.identity.orgmgmt.api.OrganizationManagerConstants;
+import oracle.iam.identity.orgmgmt.vo.Organization;
 import oracle.iam.identity.rolemgmt.api.RoleManager;
 import oracle.iam.identity.rolemgmt.api.RoleManagerConstants;
 import oracle.iam.identity.rolemgmt.vo.Role;
 import oracle.iam.identity.usermgmt.api.UserManager;
 import oracle.iam.identity.usermgmt.api.UserManagerConstants;
 import oracle.iam.identity.usermgmt.vo.User;
+import oracle.iam.identity.usermgmt.vo.UserManagerResult;
 import oracle.iam.platform.OIMClient;
 import oracle.iam.platform.authz.exception.AccessDeniedException;
 import oracle.iam.platform.context.ContextAwareString;
@@ -356,6 +360,72 @@ public class OimClientLibrary extends AnnotationLibrary {
         System.out.println("*INFO* Deleting role "+rolekey);
         
         roleManager.delete(rolekey);
+    }
+
+    @RobotKeyword(  "Creates a user in OIM and returns the ${usrkey} of the new user. Use `Get Oim User` for the list of available attributes.\n\n"+
+                    "Argument _userattributes_ is a dictionary. For default OIM user attribute names see [http://docs.oracle.com/cd/E40329_01/apirefs.1112/e28159/oracle/iam/identity/usermgmt/api/UserManagerConstants.AttributeName.html|UserManagerConstants.AttributeName].\n\n" +
+                    "Any date typed attributes must be specified as _yyyy-MM-dd HH:mm:ss.SSS_, ready to use with [http://robotframework.org/robotframework/latest/libraries/DateTime.html|DateTime].\n\n")
+    @ArgumentNames({"userAttributes"})
+    public String createOimUser(Map<String, String> userAttributes) throws UserAlreadyExistsException, ValidationFailedException, UserCreateException, OrganizationManagerException, ConfigManagerException, ParseException {
+        if (userAttributes == null) {
+            throw new RuntimeException("No attributes are passed. Attributes should be passed to specify the new user.");
+        }
+
+        if (oimClient == null) {
+            throw new RuntimeException("There is no connection to OIM");
+        }
+
+        ConfigManager configManager = oimClient.getService(ConfigManager.class);
+        Map<String, AttributeDefinition> userEntityAttributes = configManager.getAttributes(Constants.Entity.USER);
+
+        // move all entries to a hashmap. Since the User constructor needs a hashmap. And we got a map.
+        // also parse the date and number fields
+        HashMap<String, Object> userData = new HashMap<>();
+        for (Map.Entry<String, String> entry : userAttributes.entrySet()) {
+            String key = entry.getKey();
+            Object value = entry.getValue();
+
+            // only check user attributes to be converted. (Organization Name, is in the attributes but is not a user attribute, will be updated later.)
+            if (userEntityAttributes.containsKey(key)){
+                if (userEntityAttributes.get(key).getBackendType().equalsIgnoreCase("date")){
+                    if (!value.toString().isEmpty()){
+                        value = timestampDateFormat.parse(value.toString());
+                    }
+                } else if (userEntityAttributes.get(key).getBackendType().equalsIgnoreCase("number")){
+                    if (!value.toString().isEmpty()){
+                        value = Long.valueOf(value.toString());
+                    }
+                }
+            }
+            userData.put(key, value);
+        }
+
+        // set the organization
+        if (userData.containsKey(OrganizationManagerConstants.AttributeName.ORG_NAME.getId())){
+            // the user specified the organization name instead of the organization key. Going to get the organization key
+            String organizationName = (String) userData.remove(OrganizationManagerConstants.AttributeName.ORG_NAME.getId());
+
+            OrganizationManager organizationManager = oimClient.getService(OrganizationManager.class);
+
+            Organization organization = organizationManager.getDetails(organizationName, null, true);
+            String organizationKey = organization.getEntityId();
+            Long actKey = Long.valueOf(organizationKey);
+            userData.put(OrganizationManagerConstants.AttributeName.ID_FIELD.getId(), actKey);
+        }
+
+        if (userData.containsKey(UserManagerConstants.AttributeName.USER_LOGIN.getId())){
+            System.out.println("*INFO* Creating user (" + userData.get(UserManagerConstants.AttributeName.USER_LOGIN.getId()) + ") with attributes " + userData.toString());
+        } else{
+            System.out.println("*INFO* Creating user with attributes " + userData.toString());
+        }
+
+        UserManager userManager = oimClient.getService(UserManager.class);
+        // get the login for the user, or null when it should be generated
+        String login = (String) userData.get(UserManagerConstants.AttributeName.USER_LOGIN.getId());
+        User user = new User(login, userData);
+
+        UserManagerResult result = userManager.create(user);
+        return result.getEntityId();
     }
     
     @RobotKeyword(  "Deletes specified user in OIM.\n\n"+
@@ -988,14 +1058,14 @@ public class OimClientLibrary extends AnnotationLibrary {
     public Map<String, String> modifyOimUser(String usrkey, Map<String, String> modifyattributes) throws AccessDeniedException, UserSearchException, NoSuchAttributeException, ConfigManagerException, ParseException, ValidationFailedException, UserModifyException, NoSuchUserException, UserLookupException {
         
         User userModify = new User(usrkey);
-        
+
         ConfigManager configManager = oimClient.getService(ConfigManager.class);
         UserManager userManager = oimClient.getService(UserManager.class);
-        
+
         for (Map.Entry<String, String> entry : modifyattributes.entrySet()) {
             String key = entry.getKey();
             Object value = entry.getValue();
-            
+
             AttributeDefinition attributeDefinition = configManager.getAttribute(Constants.Entity.USER, key);
             if (attributeDefinition.getBackendType().equalsIgnoreCase("date")) {
                 if(!value.toString().isEmpty()) {
@@ -1008,7 +1078,7 @@ public class OimClientLibrary extends AnnotationLibrary {
             }
             userModify.setAttribute(key, value);
         }
-        
+
         System.out.println("*INFO* Modifying user "+usrkey+" ("+getUserLogin(usrkey)+") with attributes "+userModify.toString());
         
         userManager.modify(userModify);
