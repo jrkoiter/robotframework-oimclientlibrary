@@ -55,6 +55,7 @@ import oracle.iam.identity.usermgmt.vo.User;
 import oracle.iam.identity.usermgmt.vo.UserManagerResult;
 import oracle.iam.platform.OIMClient;
 import oracle.iam.platform.authz.exception.AccessDeniedException;
+import oracle.iam.platform.context.ContextAwareNumber;
 import oracle.iam.platform.context.ContextAwareString;
 import oracle.iam.platform.context.ContextManager;
 import oracle.iam.platform.entitymgr.vo.SearchCriteria;
@@ -432,7 +433,7 @@ public class OimClientLibrary extends AnnotationLibrary {
                     "Set _force_ to True if immediate deletion is required, even if OIM system property _XL.UserDeleteDelayPeriod_ is set to a non-zero value. If mentioned system property is set to zero,  _force_  has no effect: the deletion will always be immediate.\n\n"+
                     "See `Get Oim User` how to obtain a ${usrkey}.")
     @ArgumentNames({"usrkey","force="})
-    public void deleteOimUser(String usrkey, boolean force) throws ValidationFailedException, AccessDeniedException, UserModifyException, NoSuchUserException, UserDeleteException, UserDisableException, UserLookupException, tcDataSetException, InterruptedException, tcAPIException, tcColumnNotFoundException, tcTaskNotFoundException, tcBulkException, SystemConfigurationServiceException, tcDataAccessException, tcClientDataAccessException {
+    public void deleteOimUser(String usrkey, boolean force) throws ValidationFailedException, tcDataAccessException, tcAPIException, tcClientDataAccessException, UserDeleteException, UserLookupException, NoSuchUserException, SystemConfigurationServiceException, tcColumnNotFoundException, InterruptedException, tcDataSetException {
         if (oimClient == null) {
             throw new RuntimeException("There is no connection to OIM");
         }
@@ -532,13 +533,27 @@ public class OimClientLibrary extends AnnotationLibrary {
                     }
                 }
             }
-        }  finally {
+        } catch (ValidationFailedException e){
+            throw new ValidationFailedException(e, e.getErrorCode());
+        } catch (tcAPIException e) {
+            throw new tcAPIException(e.getMessage(), e);
+        } catch (tcClientDataAccessException e) {
+            throw new tcClientDataAccessException(e);
+        } catch (UserDeleteException e) {
+            throw new UserDeleteException(e, e.getErrorCode());
+        } catch (UserLookupException e) {
+            throw new UserLookupException(e, e.getErrorCode());
+        } catch (NoSuchUserException e) {
+            throw new NoSuchUserException(e, e.getErrorCode());
+        } catch (SystemConfigurationServiceException e) {
+            throw new SystemConfigurationServiceException(e);
+        } finally {
             provisioningOperationsIntf.close();
         }
     }
     
     @RobotKeywordOverload
-    public void deleteOimUser(String usrkey) throws ValidationFailedException, AccessDeniedException, UserModifyException, NoSuchUserException, UserDeleteException, UserDisableException, UserLookupException, tcDataSetException, InterruptedException, tcAPIException, tcColumnNotFoundException, tcTaskNotFoundException, tcBulkException, SystemConfigurationServiceException, tcDataAccessException, tcClientDataAccessException {
+    public void deleteOimUser(String usrkey) throws ValidationFailedException, AccessDeniedException, NoSuchUserException, UserDeleteException, UserLookupException, tcDataSetException, InterruptedException, tcAPIException, tcColumnNotFoundException, SystemConfigurationServiceException, tcDataAccessException, tcClientDataAccessException {
         deleteOimUser(usrkey, false);
     }
     
@@ -739,6 +754,7 @@ public class OimClientLibrary extends AnnotationLibrary {
             AccessPolicyServiceInternal accessPolicyServiceInternal = oimClient.getService(AccessPolicyServiceInternal.class);
             ContextManager.pushContext(null, ContextManager.ContextTypes.ADMIN, null);
             ContextManager.setValue("operationInitiator", new ContextAwareString("scheduler"), true);
+            ContextManager.setValue("JOBHISTORYID", new ContextAwareNumber(-1L), true);
             accessPolicyServiceInternal.evaluatePoliciesForUser(usrKey);
             ContextManager.popContext();
 
