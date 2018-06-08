@@ -1756,4 +1756,106 @@ public class OimClientLibrary extends AnnotationLibrary {
 
         return user.getLogin();
     }
+
+    @RobotKeyword("Retries the open tasks in OIM.\n\n"+
+            "Examples:\n" +
+            "| Retry Open Tasks | ${usrkey} | | | # Retries all open tasks for user with usrkey | \n" +
+            "| Retry Open Tasks | ${usrkey} | UvA Exchange | | # Retries all open tasks for application UvA Exchange for user with userkey | \n" +
+            "| Retry Open Tasks | ${usrkey} | UvA Exchange | Add EmailAddress | # Retries all open tasks for application UvA Exchange with name \'Add EmailAddress\' for user with userkey | \n" +
+            "| Retry Open Tasks | ${usrkey} | ${EMPTY} or ${NONE} | Create User | # Retries all open tasks with name \'Add EmailAddress\' for user with userkey | \n")
+    @ArgumentNames({"userKey","application=","taskName="})
+    public void retryOpenTasks(String userKey, String application, String taskName) throws tcAPIException, tcInvalidLookupException, tcColumnNotFoundException, tcInvalidValueException, UserNotFoundException, GenericProvisioningException, tcTaskNotFoundException {
+        if (oimClient == null) {
+            throw new RuntimeException("There is no connection to OIM");
+        }
+        if (userKey == null){
+            throw new IllegalArgumentException("userKey should not be null");
+        }
+
+        // correct the input
+        if (application != null && application.isEmpty()){
+            application = null;
+        }
+        if (taskName != null && taskName.isEmpty()){
+            taskName = null;
+        }
+
+        // get the process instances
+        String[] processInstances = getProcessInstances(userKey, application);
+        System.out.println("*INFO* Found " + processInstances.length + " application instances");
+
+        tcProvisioningOperationsIntf provisioningOperationsIntf = oimClient.getService(tcProvisioningOperationsIntf.class);
+        Set<Long> tasks = new HashSet<>();
+
+        for (String processInstance: processInstances){
+            Map<String, String> filter = new HashMap<>();
+            filter.put("Process Instance.Key", processInstance);
+            if (taskName != null){
+                filter.put("Process Definition.Tasks.Task Name", taskName);
+            }
+
+            tcResultSet result = provisioningOperationsIntf.findAllOpenProvisioningTasks(filter, new String[]{"Rejected"});
+            int size = result.getTotalRowCount();
+            System.out.println("*INFO* Found " + size + "open tasks for process instance " + processInstance);
+
+            for (int i = 0; i < size; i++){
+                result.goToRow(i);
+
+                long taskKey = result.getLongValue("Process Instance.Task Details.Key");
+                tasks.add(taskKey);
+            }
+        }
+
+        System.out.println("*INFO* Found " + tasks.size() + "open tasks to retry");
+
+        int batch = 10;
+        int done = 0;
+
+        for (long taskKey: tasks){
+            provisioningOperationsIntf.retryTask(taskKey);
+
+            if (++done % batch == 0){
+                System.out.println("*INFO* Retried " + done + "tasks, continuing..");
+            }
+        }
+    }
+
+    /**
+     * Returns the application instances of the application linked to the user with usrKey
+     *
+     * @param usrKey the key of the user
+     * @param application the name of the application
+     * @return the keys of the application instances
+     * @throws UserNotFoundException when the provisioning manager can not find the user
+     * @throws GenericProvisioningException generic provisioning exception
+     */
+    private String[] getProcessInstances(String usrKey, String application) throws UserNotFoundException, GenericProvisioningException{
+        if (oimClient == null) {
+            throw new RuntimeException("There is no connection to OIM");
+        }
+        if (usrKey == null){
+            throw new IllegalArgumentException("usrKey should not be null");
+        }
+
+        ProvisioningService provisioningManager = oimClient.getService(ProvisioningService.class);
+
+        SearchCriteria criteria = new SearchCriteria(ProvisioningConstants.AccountSearchAttribute.ACCOUNT_STATUS.getId(), "Revoked", SearchCriteria.Operator.NOT_EQUAL);
+        if (application != null){
+            SearchCriteria correctSystem = new SearchCriteria(ProvisioningConstants.AccountSearchAttribute.DISPLAY_NAME.getId(), application, SearchCriteria.Operator.EQUAL);
+            criteria = new SearchCriteria(criteria, correctSystem, SearchCriteria.Operator.AND);
+        }
+
+        List<Account> accounts = provisioningManager.getAccountsProvisionedToUser(usrKey, criteria, null);
+        if (accounts.size() == 0) {
+            throw new RuntimeException("No accounts " + application + " found for user " + usrKey);
+        }
+
+        String[] result = new String[accounts.size()];
+        for (int i = 0; i < accounts.size(); i++) {
+            Account account = accounts.get(i);
+            result[i] = account.getProcessInstanceKey();
+        }
+        return result;
+    }
+
 }
