@@ -500,14 +500,26 @@ public class OimClientLibrary extends AnnotationLibrary {
                 ContextManager.setValue("operationinitiator", new ContextAwareString("scheduler"), true);
             }
 
+            Date startDate = new Date();
             cal = Calendar.getInstance();
             cal.add(Calendar.SECOND, -10);
             Date start = cal.getTime();
+
             userManager.delete(usrkey, false);
+
             cal = Calendar.getInstance();
             cal.add(Calendar.SECOND, 10);
             Date end = cal.getTime();
-            waitForOimOrchestrationsToComplete(usrkey, "User", null, OimClientLibrary.timestampDateFormat.format(start), OimClientLibrary.timestampDateFormat.format(end));
+
+            cal = Calendar.getInstance();
+            cal.add(Calendar.SECOND, -2);
+            Date checkDate = cal.getTime();
+
+            if (checkDate.before(startDate)){
+                // the delete is finished within 2 seconds, this is not realistic, going to wait for orchestrations
+                waitForOimOrchestrationsToComplete(usrkey, "User", null, OimClientLibrary.timestampDateFormat.format(start), OimClientLibrary.timestampDateFormat.format(end));
+
+            }
 
             if (force) {
                 ContextManager.popContext();
