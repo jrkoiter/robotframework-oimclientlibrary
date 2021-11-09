@@ -501,15 +501,16 @@ public class OimClientLibrary extends AnnotationLibrary {
             }
 
             Date startDate = new Date();
+
             cal = Calendar.getInstance();
             cal.add(Calendar.SECOND, -10);
-            Date start = cal.getTime();
+            Date startSearch = cal.getTime();
 
             userManager.delete(usrkey, false);
 
             cal = Calendar.getInstance();
             cal.add(Calendar.SECOND, 10);
-            Date end = cal.getTime();
+            Date endSearch = cal.getTime();
 
             cal = Calendar.getInstance();
             cal.add(Calendar.SECOND, -2);
@@ -517,7 +518,7 @@ public class OimClientLibrary extends AnnotationLibrary {
 
             if (checkDate.before(startDate)){
                 // the delete is finished within 2 seconds, this is not realistic, going to wait for orchestrations
-                waitForOimOrchestrationsToComplete(usrkey, "User", null, OimClientLibrary.timestampDateFormat.format(start), OimClientLibrary.timestampDateFormat.format(end));
+                waitForOimOrchestrationsToComplete(usrkey, "User", null, OimClientLibrary.timestampDateFormat.format(startSearch), OimClientLibrary.timestampDateFormat.format(endSearch));
 
             }
 
@@ -637,7 +638,10 @@ public class OimClientLibrary extends AnnotationLibrary {
         if(createdBefore != null && createdBefore.isEmpty()) {
             createdBefore = null;
         }
-        
+
+        // this does not work anymore, the table is cleared after success, now use
+        // https://support.oracle.com/epmos/faces/DocumentDisplay?_afrLoop=362055734596389&id=2104334.1&_adf.ctrl-state=y8lsy2ici_150
+
         String orchprocessQuery = "SELECT id, status FROM orchprocess";
         
         if(entityId != null || entityType != null || operation != null || createdAfter != null || createdBefore != null) {
