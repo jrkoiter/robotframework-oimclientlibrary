@@ -28,7 +28,7 @@ Either download the latest [release](http://maven-repository-jrkoiter.s3-website
 2. Get the source of the robotframework-oimclientlibrary (ie. this library)
 3. Import the oimclient.jar file into a new local Maven repository (which is referenced in the pom file):
 
-		mvn org.apache.maven.plugins:maven-install-plugin:2.3.1:install-file -Dfile=/path/to/oimclient/oimclient.jar -DgroupId=oracle.iam.platform -DartifactId=oimclient -Dversion=11.1.2.2.0 -Dpackaging=jar -DlocalRepositoryPath=/path/to/robotframework-oimclientlibrary/my-repo
+		mvn org.apache.maven.plugins:maven-install-plugin:2.3.1:install-file -Dfile=/path/to/oimclient/oimclient.jar -DgroupId=oracle.iam.platform -DartifactId=oimclient -Dversion=12.2.1.3.0 -Dpackaging=jar -DlocalRepositoryPath=/path/to/robotframework-oimclientlibrary/my-repo
 
 4. Build the library. It will be generated in the subdirectory "target".
 
@@ -57,6 +57,7 @@ Usage
 		oimclient.jar
 		/path/to/oimclient/lib/*
         iam-platform-utils.jar
+        ipf.jar
 
 6. Alternatively, deploy "OimClientLibrary" to a [jrobotremoteserver](https://github.com/ombre42/jrobotremoteserver), and keep running your tests in pybot. Library definition in your tests will then be something like:
         

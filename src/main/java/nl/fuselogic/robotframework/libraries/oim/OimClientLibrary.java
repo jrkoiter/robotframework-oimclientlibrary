@@ -55,6 +55,7 @@ import oracle.iam.identity.usermgmt.vo.User;
 import oracle.iam.identity.usermgmt.vo.UserManagerResult;
 import oracle.iam.platform.OIMClient;
 import oracle.iam.platform.authz.exception.AccessDeniedException;
+import oracle.iam.platform.context.ContextAwareNumber;
 import oracle.iam.platform.context.ContextAwareString;
 import oracle.iam.platform.context.ContextManager;
 import oracle.iam.platform.entitymgr.vo.SearchCriteria;
@@ -432,7 +433,7 @@ public class OimClientLibrary extends AnnotationLibrary {
                     "Set _force_ to True if immediate deletion is required, even if OIM system property _XL.UserDeleteDelayPeriod_ is set to a non-zero value. If mentioned system property is set to zero,  _force_  has no effect: the deletion will always be immediate.\n\n"+
                     "See `Get Oim User` how to obtain a ${usrkey}.")
     @ArgumentNames({"usrkey","force="})
-    public void deleteOimUser(String usrkey, boolean force) throws ValidationFailedException, AccessDeniedException, UserModifyException, NoSuchUserException, UserDeleteException, UserDisableException, UserLookupException, tcDataSetException, InterruptedException, tcAPIException, tcColumnNotFoundException, tcTaskNotFoundException, tcBulkException, SystemConfigurationServiceException, tcDataAccessException, tcClientDataAccessException {
+    public void deleteOimUser(String usrkey, boolean force) throws ValidationFailedException, tcDataAccessException, tcAPIException, tcClientDataAccessException, UserDeleteException, UserLookupException, NoSuchUserException, SystemConfigurationServiceException, tcColumnNotFoundException, InterruptedException, tcDataSetException {
         if (oimClient == null) {
             throw new RuntimeException("There is no connection to OIM");
         }
@@ -499,14 +500,27 @@ public class OimClientLibrary extends AnnotationLibrary {
                 ContextManager.setValue("operationinitiator", new ContextAwareString("scheduler"), true);
             }
 
+            Date startDate = new Date();
+
             cal = Calendar.getInstance();
             cal.add(Calendar.SECOND, -10);
-            Date start = cal.getTime();
+            Date startSearch = cal.getTime();
+
             userManager.delete(usrkey, false);
+
             cal = Calendar.getInstance();
             cal.add(Calendar.SECOND, 10);
-            Date end = cal.getTime();
-            waitForOimOrchestrationsToComplete(usrkey, "User", null, OimClientLibrary.timestampDateFormat.format(start), OimClientLibrary.timestampDateFormat.format(end));
+            Date endSearch = cal.getTime();
+
+            cal = Calendar.getInstance();
+            cal.add(Calendar.SECOND, -2);
+            Date checkDate = cal.getTime();
+
+            if (checkDate.before(startDate)){
+                // the delete is finished within 2 seconds, this is not realistic, going to wait for orchestrations
+                waitForOimOrchestrationsToComplete(usrkey, "User", null, OimClientLibrary.timestampDateFormat.format(startSearch), OimClientLibrary.timestampDateFormat.format(endSearch));
+
+            }
 
             if (force) {
                 ContextManager.popContext();
@@ -532,13 +546,27 @@ public class OimClientLibrary extends AnnotationLibrary {
                     }
                 }
             }
-        }  finally {
+        } catch (ValidationFailedException e){
+            throw new ValidationFailedException(e, e.getErrorCode());
+        } catch (tcAPIException e) {
+            throw new tcAPIException(e.getMessage(), e);
+        } catch (tcClientDataAccessException e) {
+            throw new tcClientDataAccessException(e);
+        } catch (UserDeleteException e) {
+            throw new UserDeleteException(e, e.getErrorCode());
+        } catch (UserLookupException e) {
+            throw new UserLookupException(e, e.getErrorCode());
+        } catch (NoSuchUserException e) {
+            throw new NoSuchUserException(e, e.getErrorCode());
+        } catch (SystemConfigurationServiceException e) {
+            throw new SystemConfigurationServiceException(e);
+        } finally {
             provisioningOperationsIntf.close();
         }
     }
     
     @RobotKeywordOverload
-    public void deleteOimUser(String usrkey) throws ValidationFailedException, AccessDeniedException, UserModifyException, NoSuchUserException, UserDeleteException, UserDisableException, UserLookupException, tcDataSetException, InterruptedException, tcAPIException, tcColumnNotFoundException, tcTaskNotFoundException, tcBulkException, SystemConfigurationServiceException, tcDataAccessException, tcClientDataAccessException {
+    public void deleteOimUser(String usrkey) throws ValidationFailedException, AccessDeniedException, NoSuchUserException, UserDeleteException, UserLookupException, tcDataSetException, InterruptedException, tcAPIException, tcColumnNotFoundException, SystemConfigurationServiceException, tcDataAccessException, tcClientDataAccessException {
         deleteOimUser(usrkey, false);
     }
     
@@ -610,7 +638,10 @@ public class OimClientLibrary extends AnnotationLibrary {
         if(createdBefore != null && createdBefore.isEmpty()) {
             createdBefore = null;
         }
-        
+
+        // this does not work anymore, the table is cleared after success, now use
+        // https://support.oracle.com/epmos/faces/DocumentDisplay?_afrLoop=362055734596389&id=2104334.1&_adf.ctrl-state=y8lsy2ici_150
+
         String orchprocessQuery = "SELECT id, status FROM orchprocess";
         
         if(entityId != null || entityType != null || operation != null || createdAfter != null || createdBefore != null) {
@@ -739,6 +770,7 @@ public class OimClientLibrary extends AnnotationLibrary {
             AccessPolicyServiceInternal accessPolicyServiceInternal = oimClient.getService(AccessPolicyServiceInternal.class);
             ContextManager.pushContext(null, ContextManager.ContextTypes.ADMIN, null);
             ContextManager.setValue("operationInitiator", new ContextAwareString("scheduler"), true);
+            ContextManager.setValue("JOBHISTORYID", new ContextAwareNumber(-1L), true);
             accessPolicyServiceInternal.evaluatePoliciesForUser(usrKey);
             ContextManager.popContext();
 
@@ -1739,5 +1771,106 @@ public class OimClientLibrary extends AnnotationLibrary {
         User user = userManager.getDetails(usrKey, returnAttributes, false);
 
         return user.getLogin();
+    }
+
+    @RobotKeyword("Retries the open tasks in OIM.\n\n"+
+            "Examples:\n" +
+            "| Retry Open Tasks | ${usrkey} | | | # Retries all open tasks for user with usrkey | \n" +
+            "| Retry Open Tasks | ${usrkey} | UvA Exchange | | # Retries all open tasks for application UvA Exchange for user with userkey | \n" +
+            "| Retry Open Tasks | ${usrkey} | UvA Exchange | Add EmailAddress | # Retries all open tasks for application UvA Exchange with name \'Add EmailAddress\' for user with userkey | \n" +
+            "| Retry Open Tasks | ${usrkey} | ${EMPTY} or ${NONE} | Create User | # Retries all open tasks with name \'Add EmailAddress\' for user with userkey | \n")
+    @ArgumentNames({"userKey","application=","taskName="})
+    public void retryOpenTasks(String userKey, String application, String taskName) throws UserLookupException, GenericProvisioningException, NoSuchUserException, UserNotFoundException, GenericAppInstanceServiceException, ApplicationInstanceNotFoundException, tcAPIException, tcColumnNotFoundException, tcTaskNotFoundException {
+        if (oimClient == null) {
+            throw new RuntimeException("There is no connection to OIM");
+        }
+        if (userKey == null){
+            throw new IllegalArgumentException("userKey should not be null");
+        }
+
+        // correct the input
+        if (application != null && application.isEmpty()){
+            application = null;
+        }
+        if (taskName != null && taskName.isEmpty()){
+            taskName = null;
+        }
+
+        // get the process instances
+        List<String> processInstances = getProcessInstances(userKey, application);
+        System.out.println("*INFO* Found " + processInstances.size() + " application instances");
+
+        tcProvisioningOperationsIntf provisioningOperationsIntf = oimClient.getService(tcProvisioningOperationsIntf.class);
+        Set<Long> tasks = new HashSet<>();
+
+        for (String processInstance: processInstances){
+            Map<String, String> filter = new HashMap<>();
+            filter.put("Process Instance.Key", processInstance);
+            if (taskName != null){
+                filter.put("Process Definition.Tasks.Task Name", taskName);
+            }
+
+            tcResultSet result = provisioningOperationsIntf.findAllOpenProvisioningTasks(filter, new String[]{"Rejected"});
+            int size = result.getTotalRowCount();
+            System.out.println("*INFO* Found " + size + "open tasks for process instance " + processInstance);
+
+            for (int i = 0; i < size; i++){
+                result.goToRow(i);
+
+                long taskKey = result.getLongValue("Process Instance.Task Details.Key");
+                tasks.add(taskKey);
+            }
+        }
+
+        System.out.println("*INFO* Found " + tasks.size() + "open tasks to retry");
+
+        int batch = 10;
+        int done = 0;
+
+        for (long taskKey: tasks){
+            provisioningOperationsIntf.retryTask(taskKey);
+
+            if (++done % batch == 0){
+                System.out.println("*INFO* Retried " + done + "tasks, continuing..");
+            }
+        }
+    }
+
+    @RobotKeywordOverload
+    public void retryOpenTasks(String userKey, String application) throws UserLookupException, tcAPIException, tcColumnNotFoundException, ApplicationInstanceNotFoundException, GenericProvisioningException, tcTaskNotFoundException, UserNotFoundException, NoSuchUserException, GenericAppInstanceServiceException {
+        retryOpenTasks(userKey, application, null);
+    }
+
+    @RobotKeywordOverload
+    public void retryOpenTasks(String userKey) throws UserLookupException, tcAPIException, tcColumnNotFoundException, ApplicationInstanceNotFoundException, GenericProvisioningException, tcTaskNotFoundException, UserNotFoundException, NoSuchUserException, GenericAppInstanceServiceException {
+        retryOpenTasks(userKey, null, null);
+    }
+
+    /**
+     * Returns the application instances of the application linked to the user with usrKey
+     *
+     * @param usrKey the key of the user
+     * @param application the name of the application
+     * @return the keys of the application instances
+     * @throws UserNotFoundException when the provisioning manager can not find the user
+     * @throws GenericProvisioningException generic provisioning exception
+     */
+    private List<String> getProcessInstances(String usrKey, String application) throws UserLookupException, GenericProvisioningException, NoSuchUserException, UserNotFoundException, GenericAppInstanceServiceException, ApplicationInstanceNotFoundException {
+        if (oimClient == null) {
+            throw new RuntimeException("There is no connection to OIM");
+        }
+        if (usrKey == null){
+            throw new IllegalArgumentException("usrKey should not be null");
+        }
+
+        // get the applications provisioned to this user
+        List<Account> accounts = searchAccounts(usrKey, application, null, null, false);
+        List<String> result = new ArrayList<>();
+        for (Account account: accounts){
+            if (!ProvisioningConstants.ObjectStatus.REVOKED.getId().equals(account.getAccountStatus())){
+                result.add(account.getProcessInstanceKey());
+            }
+        }
+        return result;
     }
 }
