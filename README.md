@@ -59,7 +59,7 @@ Usage
         iam-platform-utils.jar
         ipf.jar
 
-6. Alternatively, deploy "OimClientLibrary" to a [jrobotremoteserver](https://github.com/ombre42/jrobotremoteserver), and keep running your tests in pybot. Library definition in your tests will then be something like:
+6. Alternatively, deploy "OimClientLibrary" to a [jrobotremoteserver](https://github.com/robotframework/jrobotremoteserver), and keep running your tests in pybot. Library definition in your tests will then be something like:
         
         *** Settings ***
         | Library | Remote | http://localhost:8270/ | With Name | OimLibrary |
