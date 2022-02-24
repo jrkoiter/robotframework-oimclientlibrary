@@ -1,109 +1,115 @@
-<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
-  <modelVersion>4.0.0</modelVersion>
+<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
 
-  <groupId>nl.fuselogic</groupId>
-  <artifactId>robotframework-oimclientlibrary</artifactId>
-  <version>1.1-SNAPSHOT</version>
-  <packaging>jar</packaging>
-  <properties>
-     <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
-     <maven.compiler.target>1.7</maven.compiler.target>
-     <maven.compiler.source>1.7</maven.compiler.source>
-  </properties>
+    <groupId>nl.fuselogic</groupId>
+    <artifactId>robotframework-oimclientlibrary</artifactId>
+    <version>1.1-SNAPSHOT</version>
+    <packaging>jar</packaging>
+    <properties>
+        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+        <maven.compiler.target>1.7</maven.compiler.target>
+        <maven.compiler.source>1.7</maven.compiler.source>
+    </properties>
 
-  <name>Robot Framework Oim Client Library</name>
+    <name>Robot Framework Oim Client Library</name>
 
-  <scm>
-    <connection>scm:git:https://github.com/jrkoiter/robotframework-oimclientlibrary.git</connection>
-    <tag>HEAD</tag>
-  </scm>
+    <scm>
+        <connection>scm:git:https://github.com/jrkoiter/robotframework-oimclientlibrary.git</connection>
+        <tag>HEAD</tag>
+    </scm>
 
-  <developers>
-    <developer>
-      <id>jrkoiter</id>
-      <name>Joost Koiter</name>
-      <email>joost.koiter@fuselogic.nl</email>
-      <organization>FuseLogic</organization>
-      <organizationUrl>http://www.fuselogic.nl</organizationUrl>
-    </developer>
-      <developer>
-          <id>khendriks</id>
-          <name>Kees Hendriks</name>
-          <email>kees.hendriks@fuselogic.nl</email>
-          <organization>FuseLogic</organization>
-          <organizationUrl>http://www.fuselogic.nl</organizationUrl>
-      </developer>
-  </developers>
+    <developers>
+        <developer>
+            <id>jrkoiter</id>
+            <name>Joost Koiter</name>
+            <email>joost.koiter@fuselogic.nl</email>
+            <organization>FuseLogic</organization>
+            <organizationUrl>http://www.fuselogic.nl</organizationUrl>
+        </developer>
+        <developer>
+            <id>khendriks</id>
+            <name>Kees Hendriks</name>
+            <email>kees.hendriks@fuselogic.nl</email>
+            <organization>FuseLogic</organization>
+            <organizationUrl>http://www.fuselogic.nl</organizationUrl>
+        </developer>
+    </developers>
 
-  <build>
-    <extensions>
-      <extension>
-        <groupId>org.springframework.build</groupId>
-        <artifactId>aws-maven</artifactId>
-        <version>5.0.0.RELEASE</version>
-      </extension>
-    </extensions>
-    <plugins>
-      <plugin>
-         <groupId>org.apache.maven.plugins</groupId>
-         <artifactId>maven-release-plugin</artifactId>
-         <version>2.5.3</version>
-         <dependencies>
-           <dependency>
-             <groupId>org.apache.maven.scm</groupId>
-             <artifactId>maven-scm-provider-gitexe</artifactId>
-             <version>1.9.4</version>
-           </dependency>
-         </dependencies>
-      </plugin>
-    </plugins>
-  </build>
+    <build>
+        <extensions>
+            <extension>
+                <groupId>org.springframework.build</groupId>
+                <artifactId>aws-maven</artifactId>
+                <version>5.0.0.RELEASE</version>
+            </extension>
+        </extensions>
+        <plugins>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-release-plugin</artifactId>
+                <version>2.5.3</version>
+                <dependencies>
+                    <dependency>
+                        <groupId>org.apache.maven.scm</groupId>
+                        <artifactId>maven-scm-provider-gitexe</artifactId>
+                        <version>1.9.4</version>
+                    </dependency>
+                </dependencies>
+            </plugin>
+        </plugins>
+    </build>
 
-  <dependencies>
-    <dependency>
-      <groupId>org.robotframework</groupId>
-      <artifactId>javalib-core</artifactId>
-      <version>1.2.1</version>
-    </dependency>
-    <dependency>
-      <groupId>oracle.oim</groupId>
-      <artifactId>oimclient</artifactId>
-      <version>12.2.1.4.0</version>
-      <scope>compile</scope>
-    </dependency>
-    <dependency>
-      <groupId>junit</groupId>
-      <artifactId>junit</artifactId>
-      <version>4.8.2</version>
-      <scope>test</scope>
-    </dependency>
-  </dependencies>
+    <dependencies>
+        <dependency>
+            <groupId>org.robotframework</groupId>
+            <artifactId>javalib-core</artifactId>
+            <version>1.2.1</version>
+        </dependency>
+        <dependency>
+            <groupId>oracle.oim</groupId>
+            <artifactId>oimclient</artifactId>
+            <version>12.2.1.4.0</version>
+            <scope>compile</scope>
+        </dependency>
+        <dependency>
+            <groupId>junit</groupId>
+            <artifactId>junit</artifactId>
+            <version>4.8.2</version>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>oracle.weblogic</groupId>
+            <artifactId>wlfullclient</artifactId>
+            <version>12.2.1.4.0</version>
+        </dependency>
+    </dependencies>
 
-  <distributionManagement>
-      <repository>
-          <id>aws-release</id>
-          <name>AWS Release Repository</name>
-          <url>s3://maven-repository-jrkoiter/release</url>
-      </repository>
-      <snapshotRepository>
-          <id>aws-snapshot</id>
-          <name>AWS Snapshot Repository</name>
-          <url>s3://maven-repository-jrkoiter/snapshot</url>
-      </snapshotRepository>
-  </distributionManagement>
-  
-  <!-- 
-    Install (proprietary) Oracle dependency into local repository as follows:
+    <distributionManagement>
+        <repository>
+            <id>aws-release</id>
+            <name>AWS Release Repository</name>
+            <url>s3://maven-repository-jrkoiter/release</url>
+        </repository>
+        <snapshotRepository>
+            <id>aws-snapshot</id>
+            <name>AWS Snapshot Repository</name>
+            <url>s3://maven-repository-jrkoiter/snapshot</url>
+        </snapshotRepository>
+    </distributionManagement>
 
-    mvn org.apache.maven.plugins:maven-install-plugin:2.3.1:install-file -Dfile=/path/to/oimclient/oimclient.jar -DgroupId=oracle.iam.platform -DartifactId=oimclient -Dversion=12.2.1.3.0 -Dpackaging=jar -DlocalRepositoryPath=/path/to/robotframework-oimclientlibrary/my-repo
+    <!--
+      Install (proprietary) Oracle dependency into local repository as follows:
 
-    Source: http://stackoverflow.com/questions/2229757/maven-add-a-dependency-to-a-jar-by-relative-path/2230464#2230464
-  -->
-  <repositories>
-    <repository>
-      <id>my-local-repo</id>
-      <url>file://${basedir}/./my-repo</url>
-    </repository>
-  </repositories>
-  
+      mvn org.apache.maven.plugins:maven-install-plugin:2.3.1:install-file -Dfile=/path/to/oimclient/oimclient.jar -DgroupId=oracle.iam.platform -DartifactId=oimclient -Dversion=12.2.1.3.0 -Dpackaging=jar -DlocalRepositoryPath=/path/to/robotframework-oimclientlibrary/my-repo
+
+      Source: http://stackoverflow.com/questions/2229757/maven-add-a-dependency-to-a-jar-by-relative-path/2230464#2230464
+    -->
+    <repositories>
+        <repository>
+            <id>my-local-repo</id>
+            <url>file://${basedir}/./my-repo</url>
+        </repository>
+    </repositories>
+
 </project>
